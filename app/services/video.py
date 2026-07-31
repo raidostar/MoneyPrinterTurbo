@@ -1006,6 +1006,40 @@ def _read_subtitle_text(subtitle_path: str) -> str:
         return ""
 
 
+def apply_card_layout(video_clip, params):
+    """
+    영상을 축소해 배경 캔버스 위에 얹고, 위아래에 여백을 남긴다.
+
+    유튜브 쇼츠에서 흔한 구성이다. 영상이 화면을 꽉 채우면 헤드라인과 자막을 얹을
+    자리가 영상 위밖에 없어 화면이 어수선해진다. 영상을 카드처럼 줄여 두면 위쪽에
+    헤드라인, 아래쪽에 나레이션 자막을 겹치지 않게 놓을 수 있다.
+
+    영상은 가로를 캔버스에 꽉 채우고, 목표 높이를 넘는 만큼은 위아래를 잘라 낸다.
+    세로 소재를 높이에 맞춰 줄이면 좌우로도 여백이 생겨 카드가 아니라 그냥 작아진
+    영상처럼 보이므로, 가로를 채우고 높이를 잘라 띠 모양을 유지한다.
+    """
+    canvas_width, canvas_height = video_clip.size
+    target_height = min(
+        int(canvas_height * params.layout_video_height_ratio), canvas_height
+    )
+
+    scale = canvas_width / video_clip.w
+    scaled = video_clip.resized(
+        new_size=(canvas_width, max(1, round(video_clip.h * scale)))
+    )
+    if scaled.h > target_height:
+        # 세로 중앙을 남긴다. 인물이나 제품은 대체로 가운데 있어 위아래를 잘라도
+        # 피사체가 살아남는다.
+        crop_top = (scaled.h - target_height) // 2
+        scaled = scaled.cropped(y1=crop_top, y2=crop_top + target_height)
+    background = ColorClip(
+        size=(canvas_width, canvas_height),
+        color=_hex_to_rgb(params.layout_background_color),
+    ).with_duration(video_clip.duration)
+
+    return CompositeVideoClip([background, scaled.with_position("center")])
+
+
 def resolve_subtitle_font(font_name: str, subtitle_path: str) -> str:
     """
     선택된 글꼴이 이번 자막을 그릴 수 없으면 그릴 수 있는 번들 글꼴로 교체한다.
@@ -1250,6 +1284,11 @@ def generate_video(
         )
         voice_source_clip = clip_stack.enter_context(AudioFileClip(audio_path))
         video_clip = source_video_clip
+        if params.layout == "card":
+            # 자막보다 먼저 적용한다. 자막 위치는 캔버스 높이를 기준으로 계산되므로,
+            # 레이아웃을 나중에 씌우면 자막이 영상 안쪽에 갇힌다.
+            video_clip = apply_card_layout(video_clip, params)
+            clip_stack.callback(video_clip.close)
         audio_clip = voice_source_clip.with_effects(
             [afx.MultiplyVolume(params.voice_volume)]
         )
