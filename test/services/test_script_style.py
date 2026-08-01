@@ -120,6 +120,31 @@ class TestWebuiStyleWiring(unittest.TestCase):
             app.session_state["custom_system_prompt"], llm.STORY_SCRIPT_SYSTEM_PROMPT
         )
 
+    def test_the_style_survives_a_ui_language_change(self):
+        """
+        위젯 key 에는 언어가 붙는다. 언어를 바꾸면 새 key 가 기본값으로 시작해 고른
+        스타일이 사라지는데, 시스템 프롬프트는 story 인 채로 남는다. 화면은 '정보
+        전달' 을 보여주면서 실제로는 story 프롬프트로 대본을 쓰게 된다.
+        """
+        app = AppTest.from_file(str(Path("webui") / "Main.py"), default_timeout=60)
+        app.session_state["ui_language"] = "ko"
+        app.run()
+
+        next(
+            box for box in app.selectbox if box.key == "script_style_select_ko"
+        ).select("story").run()
+
+        # 언어는 상단 위젯이 소유한다. session_state 를 직접 바꾸면 다음 실행에서
+        # 위젯 값으로 되돌아간다.
+        next(
+            box for box in app.selectbox if box.key == "top_language_code_selector"
+        ).select("en").run()
+
+        selector = next(
+            box for box in app.selectbox if box.key == "script_style_select_en"
+        )
+        self.assertEqual(selector.value, "story")
+
     def test_the_standalone_script_button_passes_the_style(self):
         """
         미리보기와 '대본 생성' 버튼이 스타일을 빠뜨리면, 화면에서는 story 를 골랐는데

@@ -904,6 +904,7 @@ def _apply_pending_task_restore():
     st.session_state["paragraph_number_input"] = params.get("paragraph_number", 1)
     st.session_state["video_script_prompt"] = params.get("video_script_prompt") or ""
     script_style = params.get("script_style") or llm.DEFAULT_SCRIPT_STYLE
+    st.session_state["script_style"] = script_style
     _set_stable_widget_value("script_style_select", script_style)
     st.session_state["custom_system_prompt"] = params.get(
         "custom_system_prompt"
@@ -1578,11 +1579,12 @@ def reset_script_system_prompt():
     """고급 대본 설정의 시스템 프롬프트를 현재 선택한 스타일의 기본 내용으로 되돌린다."""
     # stable_selectbox 는 언어별 key 로 상태를 보관한다. 원래 key 로 읽으면 항상
     # 비어 있어서, 어떤 스타일을 골라도 기본 프롬프트로 되돌아간다.
-    st.session_state["custom_system_prompt"] = llm.script_style_prompt(
-        st.session_state.get(
-            localized_widget_key("script_style_select"), llm.DEFAULT_SCRIPT_STYLE
-        )
+    style = st.session_state.get(
+        localized_widget_key("script_style_select"),
+        st.session_state.get("script_style", llm.DEFAULT_SCRIPT_STYLE),
     )
+    st.session_state["script_style"] = style
+    st.session_state["custom_system_prompt"] = llm.script_style_prompt(style)
 
 
 def reset_subtitle_settings():
@@ -2142,16 +2144,23 @@ def _render_script_settings(panel, params):
                         name: tr(f"Script Style {name}")
                         for name in sorted(llm.SCRIPT_STYLE_PROMPTS)
                     }
+                    # 위젯 key 에는 언어가 붙는다. 언어를 바꾸면 새 key 가 기본값으로
+                    # 시작해 고른 스타일이 사라지는데, 시스템 프롬프트는 그대로 남아
+                    # 화면 표시와 실제로 쓰이는 프롬프트가 어긋난다. 언어와 무관한
+                    # 정규 값을 따로 두고 위젯을 거기서 되살린다.
                     params.script_style = stable_selectbox(
                         tr("Script Style"),
                         options=sorted(llm.SCRIPT_STYLE_PROMPTS),
-                        default_value=llm.DEFAULT_SCRIPT_STYLE,
+                        default_value=st.session_state.get(
+                            "script_style", llm.DEFAULT_SCRIPT_STYLE
+                        ),
                         key="script_style_select",
                         format_func=script_style_labels.__getitem__,
                         # 스타일을 바꾸면 아래 프롬프트도 그 스타일의 기본값으로 따라간다.
                         # 그러지 않으면 고른 스타일과 실제로 쓰이는 프롬프트가 어긋난다.
                         on_change=reset_script_system_prompt,
                     )
+                    st.session_state["script_style"] = params.script_style
 
                     system_prompt = st.text_area(
                         tr("Custom System Prompt"),
