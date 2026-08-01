@@ -58,6 +58,66 @@ Generate a script for a video, depending on the subject of the video.
 """.strip()
 
 
+STORY_SCRIPT_SYSTEM_PROMPT = """
+# Role: Short-form Story Writer
+
+You write narration for a short vertical video. Your job is to be watched to the
+end, not to be informative. A correct, boring script has failed.
+
+## The story is dramatised, not reported
+Invent the scene. Give it a specific day, a specific object, a specific stupid
+thing the narrator did. Made-up personal detail is expected here — the viewer is
+watching a story, not reading a report.
+
+One hard line: never invent factual claims. No health effects, no numbers about
+results, no prices, no "studies show", no product performance. Invent the
+narrator's life; never invent the world.
+
+## Constraints
+1. open mid-disaster. the first sentence is the worst moment, not the setup.
+   not "I started working out" but "I threw the whole thing in the bin on day
+   four."
+2. be specific and physical. not "it tasted bad" — name the texture, the sound,
+   what the narrator did with their face. concrete beats descriptive.
+3. make the narrator the fool. self-deprecation earns the viewer's side. never
+   sound like someone giving advice from above.
+4. put a turn in the middle. something the narrator assumed turns out backwards,
+   and the viewer should feel the moment it flips.
+5. short sentences. spoken rhythm. a sentence can be two words.
+6. the last line is the punch — what the opening disaster was actually about.
+   land it and stop. no summary, no lesson, no "so if you're like me".
+7. the narration is read by a text-to-speech voice that takes its pauses from
+   punctuation alone. keep the run of words before a noun short, and put a comma
+   where you want the breath.
+8. aim for 35 to 45 seconds read aloud.
+9. plain text only. no markdown, no titles, no speaker labels, no emoji.
+10. respond in the same language as the video subject.
+""".strip()
+
+
+# 스타일 이름 → 기본 system prompt. 스키마와 WebUI 목록이 이 딕셔너리를 그대로 쓴다.
+SCRIPT_STYLE_PROMPTS = {
+    "informative": DEFAULT_SCRIPT_SYSTEM_PROMPT,
+    "story": STORY_SCRIPT_SYSTEM_PROMPT,
+}
+DEFAULT_SCRIPT_STYLE = "informative"
+
+
+def script_style_prompt(script_style: str) -> str:
+    """
+    스타일 이름을 기본 system prompt 로 바꾼다. 모르는 이름이면 기본값으로 돌아간다.
+
+    API 나 오래된 설정에서 넘어온 값이 곧바로 대본 생성을 막지 않게 한다. 스타일은
+    표현 선택일 뿐이라, 틀린 이름 하나로 영상 생성 전체가 실패할 이유가 없다.
+    """
+    prompt = SCRIPT_STYLE_PROMPTS.get(str(script_style or "").strip())
+    if prompt is not None:
+        return prompt
+    if script_style:
+        logger.warning(f"unknown script style, falling back to default: {script_style!r}")
+    return SCRIPT_STYLE_PROMPTS[DEFAULT_SCRIPT_STYLE]
+
+
 # 제공자가 응답 본문에 그대로 실어 보내는 '일일 한도 소진' 문구.
 # 우리가 쓰는 메시지가 아니라 상대 서버가 보내오는 원문이므로, 번역하면 매칭이
 # 깨져 한도 초과가 정상 대본으로 처리된다. 아래 중국어는 그래서 원문 그대로 둔다.
@@ -491,6 +551,7 @@ def build_script_prompt(
     paragraph_number: int = 1,
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
+    script_style: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -503,7 +564,8 @@ def build_script_prompt(
     # '대본 생성 규칙' 과 '런타임 컨텍스트' 를 나눠서 이어 붙인다. 이렇게 하면 고급 사용자가
     # 기본 system prompt 를 덮어써도 영상 주제, 언어, 문단 수처럼 생성할 때마다 반드시
     # 들어가야 하는 파라미터를 빠뜨리지 않는다.
-    prompt = custom_system_prompt or DEFAULT_SCRIPT_SYSTEM_PROMPT
+    # 직접 써 넣은 프롬프트가 항상 이긴다. 스타일은 기본값을 고르는 수단일 뿐이다.
+    prompt = custom_system_prompt or script_style_prompt(script_style)
     prompt += f"""
 
 # Initialization:
@@ -528,6 +590,7 @@ def generate_script(
     paragraph_number: int = 1,
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
+    script_style: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -542,6 +605,7 @@ def generate_script(
         paragraph_number=paragraph_number,
         video_script_prompt=video_script_prompt,
         custom_system_prompt=custom_system_prompt,
+        script_style=script_style,
     )
     final_script = ""
     logger.info(
