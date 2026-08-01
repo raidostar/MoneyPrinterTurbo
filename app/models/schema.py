@@ -122,6 +122,11 @@ class VideoParams(BaseModel):
     layout_background_color: str = "#FFFFFF"
     # 영상이 차지할 세로 비율. 0.55 면 화면 높이의 55% 를 영상이 쓰고 나머지가 여백이다.
     layout_video_height_ratio: float = Field(default=0.55, ge=0.3, le=1.0)
+    # 화면 상단에 얹는 후킹 문구. 비워 두면 card 레이아웃에서 LLM 이 생성한다.
+    headline: str = Field(default="", max_length=200)
+    headline_color: str = "#111111"
+    headline_stroke_color: str = ""
+    headline_font_size: int = Field(default=92, ge=20, le=200)
 
     font_size: int = 60
     stroke_color: Optional[str] = "#000000"

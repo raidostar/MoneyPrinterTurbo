@@ -714,6 +714,92 @@ Please note that you must use English for generating video search terms; Chinese
 
 # 플랫폼마다 선호하는 문구 길이와 hashtag 개수가 다르다. 여기서는 보수적인 상한을 써서,
 # 모델이 지나치게 긴 내용을 반환한 뒤 호출자가 다시 잘라 내야 하는 상황을 피한다.
+# 쇼츠 상단에 얹는 후킹 문구. 나레이션 대본과 다른 물건이다. 대본은 귀로 듣는
+# 글이고 헤드라인은 눈으로 0.5 초 안에 읽히는 글이라, 대본 첫 문장을 그대로 쓰면
+# 길고 밋밋해진다. 두 줄로 끊어 큰 글자로 얹는 것이 실제 쇼츠의 흔한 형태다.
+MAX_HEADLINE_LINE_LENGTH = 22
+HEADLINE_LINES = 2
+
+DEFAULT_HEADLINE_SYSTEM_PROMPT = """
+# Role
+You write the on-screen headline for a short-form video — the two lines of large
+text pinned above the footage. It is not the narration and not a title card.
+
+## Constraints
+1. Exactly two lines, separated by a single | character. Nothing else.
+   Example: first line here|second line here
+2. Each line must be at most {max_line} characters. Shorter is better.
+3. It has to land in half a second. Curiosity, a number, a stake, or a reversal.
+4. Do not summarise the video. Make the viewer need the next line.
+5. No markdown, no quotes, no emoji, no hashtags, no trailing punctuation
+   except ? or !.
+6. Respond in the same language as the script.
+""".strip()
+
+
+def _fallback_headline(video_subject: str, video_script: str) -> str:
+    """LLM 을 쓸 수 없을 때 주제나 대본 앞부분을 두 줄로 잘라 쓴다."""
+    source = str(video_subject or "").strip() or str(video_script or "").strip()
+    if not source:
+        return ""
+
+    words = source.split()
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) > MAX_HEADLINE_LINE_LENGTH and current:
+            lines.append(current)
+            current = word
+            if len(lines) == HEADLINE_LINES:
+                break
+        else:
+            current = candidate
+    if current and len(lines) < HEADLINE_LINES:
+        lines.append(current)
+    return "\n".join(lines[:HEADLINE_LINES])
+
+
+def generate_headline(
+    video_subject: str = "",
+    video_script: str = "",
+    language: str = "",
+) -> str:
+    """
+    화면 상단에 얹을 두 줄 후킹 문구를 만든다.
+
+    실패해도 영상 생성을 막지 않는다. 헤드라인은 보조 요소이므로, 모델이 없거나
+    형식을 어기면 주제를 잘라 쓰는 대비책으로 내려간다.
+    """
+    subject = _limit_script_text(video_subject, MAX_SOCIAL_SUBJECT_LENGTH, "video_subject")
+    script = _limit_script_text(video_script, MAX_SOCIAL_SCRIPT_LENGTH, "video_script")
+    if not subject and not script:
+        return ""
+
+    prompt = DEFAULT_HEADLINE_SYSTEM_PROMPT.format(max_line=MAX_HEADLINE_LINE_LENGTH)
+    prompt += f"\n\n# Video subject\n{subject}\n\n# Script\n{script}"
+    if language:
+        prompt += f"\n\n# Language\n{language}"
+
+    try:
+        response = _generate_response(prompt=prompt)
+    except Exception as exc:
+        logger.warning(f"headline generation failed: {_sanitize_error_message(exc)}")
+        return _fallback_headline(subject, script)
+
+    # `_generate_response` 는 대본용이라 반환값에서 개행을 모두 제거한다. 두 줄을
+    # 유지하려면 개행이 아닌 구분자를 쓸 수밖에 없다.
+    lines = [
+        segment.strip().strip('"').strip("'")
+        for segment in str(response or "").split("|")
+        if segment.strip()
+    ]
+    if not lines:
+        logger.warning("headline generation returned nothing, using fallback")
+        return _fallback_headline(subject, script)
+
+    return "\n".join(lines[:HEADLINE_LINES])
+
+
 SOCIAL_PLATFORMS = {
     "tiktok": {"title_max": 100, "caption_max": 2200, "hashtag_count": 5},
     "youtube_shorts": {"title_max": 100, "caption_max": 5000, "hashtag_count": 3},

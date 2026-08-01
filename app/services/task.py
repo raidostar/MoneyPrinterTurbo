@@ -1217,6 +1217,16 @@ def _run_pipeline(
         params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
 
     # 6. Generate final videos
+    # card 레이아웃은 상단 여백에 얹을 문구가 있어야 의미가 있다. 사용자가 직접 넣지
+    # 않았을 때만 생성한다. 대본 첫 문장을 그대로 쓰면 길고 밋밋해서 따로 뽑는다.
+    if params.layout == "card" and not str(params.headline or "").strip():
+        params.headline = llm.generate_headline(
+            video_subject=params.video_subject,
+            video_script=video_script,
+            language=params.video_language,
+        )
+        logger.info(f"headline: {params.headline!r}")
+
     final_video_paths, combined_video_paths, generation_warnings = generate_final_videos(
         task_id,
         params,

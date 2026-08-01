@@ -1,9 +1,14 @@
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from moviepy import ColorClip
 
 from app.models.schema import VideoParams
-from app.services import video
+from app.services import llm, video
+
+
+FONTS_DIR = Path(__file__).parent.parent.parent / "resource" / "fonts"
 
 
 def _params(**overrides):
@@ -104,3 +109,67 @@ class TestCardLayout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHeadline(unittest.TestCase):
+    """상단 헤드라인 생성과 렌더링."""
+
+    def test_generated_headline_has_two_lines(self):
+        """
+        헤드라인은 두 줄로 얹힌다. `_generate_response` 가 반환값에서 개행을 모두
+        지우므로 개행을 구분자로 쓰면 한 줄로 붙는다. 다른 구분자를 쓰는지 확인한다.
+        """
+        with patch.object(llm, "_generate_response", return_value="첫 줄|둘째 줄"):
+            headline = llm.generate_headline(
+                video_subject="주제", video_script="대본", language="ko-KR"
+            )
+
+        self.assertEqual(headline.split("\n"), ["첫 줄", "둘째 줄"])
+
+    def test_headline_falls_back_when_the_model_fails(self):
+        """헤드라인은 보조 요소다. 생성 실패가 영상 생성을 막아서는 안 된다."""
+        with patch.object(llm, "_generate_response", side_effect=RuntimeError("down")):
+            headline = llm.generate_headline(
+                video_subject="헬스 초보가 닭가슴살 때문에 고생한 이야기",
+                video_script="",
+                language="ko-KR",
+            )
+
+        self.assertTrue(headline)
+        self.assertLessEqual(len(headline.split("\n")), llm.HEADLINE_LINES)
+
+    def test_headline_is_capped_at_two_lines(self):
+        """모델이 더 많이 뱉어도 레이아웃이 감당할 수 있는 만큼만 쓴다."""
+        with patch.object(llm, "_generate_response", return_value="a|b|c|d"):
+            headline = llm.generate_headline(video_subject="x", video_script="y")
+
+        self.assertEqual(headline.split("\n"), ["a", "b"])
+
+    def test_empty_input_produces_no_headline(self):
+        self.assertEqual(llm.generate_headline(), "")
+
+    def test_headline_is_drawn_above_the_video(self):
+        """
+        문구가 상단 여백에 실제로 그려지는지 확인한다. 여백이 배경색 그대로면
+        헤드라인이 렌더링되지 않은 것이다.
+        """
+        source = ColorClip(size=(1080, 1920), color=(30, 90, 200)).with_duration(2)
+        params = _params(layout_video_height_ratio=0.5)
+        params.headline = "첫 줄\n둘째 줄"
+        params.headline_color = "#111111"
+        try:
+            plain = video.apply_card_layout(source, _params(layout_video_height_ratio=0.5))
+            with_headline = video.apply_card_layout(
+                source, params, str(FONTS_DIR / "Pretendard-Bold.ttf")
+            )
+            top_plain = plain.get_frame(0)[:400]
+            top_headline = with_headline.get_frame(0)[:400]
+
+            self.assertTrue(
+                (top_plain != top_headline).any(),
+                "상단 여백이 그대로다 — 헤드라인이 그려지지 않았다",
+            )
+        finally:
+            plain.close()
+            with_headline.close()
+            source.close()

@@ -1084,7 +1084,32 @@ def _font_path_within_bundle(font_name: str) -> str:
         return ""
 
 
-def apply_card_layout(video_clip, params):
+def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
+    """
+    상단 여백에 얹을 두 줄 헤드라인 클립을 만든다. 문구가 없으면 ``None``.
+
+    자막과 달리 영상 위가 아니라 여백 위에 놓이므로, 자막 색을 그대로 쓰면 배경과
+    같은 색이 되어 사라질 수 있다. 색을 따로 받는 이유다.
+    """
+    text = str(getattr(params, "headline", "") or "").strip()
+    if not text:
+        return None
+
+    stroke_color = str(getattr(params, "headline_stroke_color", "") or "") or None
+    return TextClip(
+        text=text,
+        font=font_path,
+        font_size=params.headline_font_size,
+        color=params.headline_color,
+        stroke_color=stroke_color,
+        stroke_width=2 if stroke_color else 0,
+        size=(int(canvas_width * 0.92), None),
+        method="caption",
+        text_align="center",
+    ).with_duration(duration)
+
+
+def apply_card_layout(video_clip, params, font_path: str = ""):
     """
     영상을 축소해 배경 캔버스 위에 얹고, 위아래에 여백을 남긴다.
 
@@ -1115,7 +1140,17 @@ def apply_card_layout(video_clip, params):
         color=_hex_to_rgb(params.layout_background_color),
     ).with_duration(video_clip.duration)
 
-    return CompositeVideoClip([background, scaled.with_position("center")])
+    layers = [background, scaled.with_position("center")]
+
+    headline = _headline_clip(params, font_path, canvas_width, video_clip.duration)
+    if headline is not None:
+        # 영상 위쪽 여백의 세로 중앙에 놓는다. 여백보다 문구가 길면 영상을 덮게 되는데,
+        # 그때는 위쪽에 붙여 최소한 잘리지 않게 한다.
+        top_margin = (canvas_height - scaled.h) // 2
+        y = max(0, (top_margin - headline.h) // 2)
+        layers.append(headline.with_position(("center", y)))
+
+    return CompositeVideoClip(layers)
 
 
 def subtitle_font_path(font_name: str) -> tuple[str, str]:
@@ -1404,7 +1439,7 @@ def generate_video(
         if params.layout == "card":
             # 자막보다 먼저 적용한다. 자막 위치는 캔버스 높이를 기준으로 계산되므로,
             # 레이아웃을 나중에 씌우면 자막이 영상 안쪽에 갇힌다.
-            video_clip = apply_card_layout(video_clip, params)
+            video_clip = apply_card_layout(video_clip, params, font_path)
             clip_stack.callback(video_clip.close)
         audio_clip = voice_source_clip.with_effects(
             [afx.MultiplyVolume(params.voice_volume)]
