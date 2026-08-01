@@ -737,15 +737,16 @@ text pinned above the footage. It is not the narration and not a title card.
 """.strip()
 
 
-def _fallback_headline(video_subject: str, video_script: str) -> str:
-    """LLM 을 쓸 수 없을 때 주제나 대본 앞부분을 두 줄로 잘라 쓴다."""
-    source = str(video_subject or "").strip() or str(video_script or "").strip()
-    if not source:
-        return ""
+def _wrap_headline(text: str) -> str:
+    """
+    공백에서 접어 두 줄까지 만들고, 줄마다 길이를 잘라 폭을 지킨다.
 
-    words = source.split()
+    모델이 길이 지시를 어겨도 여기서 막아야 한다. 헤드라인은 `method="caption"`
+    으로 그리기 때문에 긴 줄은 가로로 삐져나오는 대신 아래로 접히고, 그만큼
+    영상 위로 내려와 겹친다. 공백 없는 한 덩어리는 접을 자리가 없어 자른다.
+    """
     lines, current = [], ""
-    for word in words:
+    for word in str(text or "").split():
         candidate = f"{current} {word}".strip()
         if len(candidate) > MAX_HEADLINE_LINE_LENGTH and current:
             lines.append(current)
@@ -756,7 +757,13 @@ def _fallback_headline(video_subject: str, video_script: str) -> str:
             current = candidate
     if current and len(lines) < HEADLINE_LINES:
         lines.append(current)
-    return "\n".join(lines[:HEADLINE_LINES])
+    return "\n".join(line[:MAX_HEADLINE_LINE_LENGTH] for line in lines[:HEADLINE_LINES])
+
+
+def _fallback_headline(video_subject: str, video_script: str) -> str:
+    """LLM 을 쓸 수 없을 때 주제나 대본 앞부분을 두 줄로 잘라 쓴다."""
+    source = str(video_subject or "").strip() or str(video_script or "").strip()
+    return _wrap_headline(source)
 
 
 def generate_headline(
@@ -786,18 +793,31 @@ def generate_headline(
         logger.warning(f"headline generation failed: {_sanitize_error_message(exc)}")
         return _fallback_headline(subject, script)
 
+    # `_generate_response` 는 호출자가 실패를 눈으로 확인하도록 예외 대신 "Error: "
+    # 로 시작하는 문자열을 돌려준다. 이걸 거르지 않으면 오류 메시지가 그대로
+    # 헤드라인이 되어 영상에 박힌다.
+    text = str(response or "").strip()
+    if not text or text.startswith("Error:"):
+        logger.warning(f"headline generation returned no usable text: {text[:200]!r}")
+        return _fallback_headline(subject, script)
+
     # `_generate_response` 는 대본용이라 반환값에서 개행을 모두 제거한다. 두 줄을
     # 유지하려면 개행이 아닌 구분자를 쓸 수밖에 없다.
     lines = [
         segment.strip().strip('"').strip("'")
-        for segment in str(response or "").split("|")
+        for segment in text.split("|", HEADLINE_LINES)[:HEADLINE_LINES]
         if segment.strip()
     ]
     if not lines:
         logger.warning("headline generation returned nothing, using fallback")
         return _fallback_headline(subject, script)
 
-    return "\n".join(lines[:HEADLINE_LINES])
+    # 길이 지시를 지켰으면 모델이 고른 줄바꿈 위치를 그대로 둔다. 어겼을 때만
+    # 다시 접는다. 멀쩡한 줄까지 접으면 의미 단위가 엉뚱한 곳에서 끊긴다.
+    if any(len(line) > MAX_HEADLINE_LINE_LENGTH for line in lines):
+        logger.warning("headline lines exceed the limit, rewrapping")
+        return _wrap_headline(" ".join(lines))
+    return "\n".join(lines)
 
 
 SOCIAL_PLATFORMS = {

@@ -175,6 +175,52 @@ class TestHeadline(unittest.TestCase):
             source.close()
 
 
+class TestHeadlineIsBounded(unittest.TestCase):
+    """모델이 규칙을 어겼을 때 헤드라인이 영상을 망치지 않아야 한다."""
+
+    def test_provider_failure_string_does_not_become_the_headline(self):
+        """
+        `_generate_response` 는 예외 대신 "Error: ..." 문자열을 돌려준다. 이걸
+        거르지 않으면 오류 메시지가 그대로 영상에 박힌다.
+        """
+        with patch.object(
+            llm, "_generate_response", return_value="Error: connection refused"
+        ):
+            headline = llm.generate_headline(
+                video_subject="닭가슴살 이야기", video_script="본문"
+            )
+        self.assertNotIn("Error", headline)
+        self.assertEqual(headline, llm._fallback_headline("닭가슴살 이야기", "본문"))
+
+    def test_overlong_response_is_rewrapped_within_the_limit(self):
+        """
+        헤드라인은 caption 으로 그려서 긴 줄이 가로로 넘치는 대신 아래로 접힌다.
+        그만큼 영상 위로 내려와 겹치므로 길이를 강제해야 한다.
+        """
+        long_line = " ".join(["단어"] * 40)
+        with patch.object(llm, "_generate_response", return_value=long_line):
+            headline = llm.generate_headline(video_subject="주제", video_script="본문")
+
+        lines = headline.split("\n")
+        self.assertLessEqual(len(lines), llm.HEADLINE_LINES)
+        for line in lines:
+            self.assertLessEqual(len(line), llm.MAX_HEADLINE_LINE_LENGTH)
+
+    def test_a_single_huge_token_is_truncated(self):
+        """공백이 없으면 접을 자리가 없다. 그래도 길이는 지켜야 한다."""
+        with patch.object(llm, "_generate_response", return_value="가" * 200_000):
+            headline = llm.generate_headline(video_subject="주제", video_script="본문")
+        self.assertLessEqual(len(headline), llm.MAX_HEADLINE_LINE_LENGTH)
+
+    def test_a_valid_response_keeps_the_line_break_the_model_chose(self):
+        """길이를 지킨 줄까지 다시 접으면 의미 단위가 엉뚱한 곳에서 끊긴다."""
+        with patch.object(
+            llm, "_generate_response", return_value="세 입 만에 포기?|닭가슴살 탓이 아니었다"
+        ):
+            headline = llm.generate_headline(video_subject="주제", video_script="본문")
+        self.assertEqual(headline, "세 입 만에 포기?\n닭가슴살 탓이 아니었다")
+
+
 class TestSubtitlePlacementAndCorners(unittest.TestCase):
     """자막 여백 배치와 둥근 모서리."""
 
