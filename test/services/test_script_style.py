@@ -20,10 +20,17 @@ class TestScriptStyleSelection(unittest.TestCase):
         self.assertIn(llm.STORY_SCRIPT_SYSTEM_PROMPT, prompt)
         self.assertNotIn(llm.DEFAULT_SCRIPT_SYSTEM_PROMPT, prompt)
 
-    def test_no_style_keeps_the_previous_default(self):
-        """스타일을 지정하지 않은 기존 호출의 동작은 바뀌지 않아야 한다."""
-        prompt = llm.build_script_prompt(video_subject="닭가슴살")
-        self.assertIn(llm.DEFAULT_SCRIPT_SYSTEM_PROMPT, prompt)
+    def test_omitting_the_style_is_the_same_as_asking_for_the_default_one(self):
+        """
+        스타일을 넘기지 않는 기존 호출이 계속 예전 프롬프트를 받아야 한다. 기본
+        스타일을 이름으로 지정했을 때와 결과가 같은지로 확인한다.
+        """
+        without = llm.build_script_prompt(video_subject="닭가슴살")
+        with_default = llm.build_script_prompt(
+            video_subject="닭가슴살", script_style=llm.DEFAULT_SCRIPT_STYLE
+        )
+        self.assertEqual(without, with_default)
+        self.assertIn(llm.DEFAULT_SCRIPT_SYSTEM_PROMPT, without)
 
     def test_a_written_prompt_wins_over_the_style(self):
         """
