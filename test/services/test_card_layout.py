@@ -6,6 +6,7 @@ from moviepy import ColorClip
 
 from app.models.schema import VideoParams
 from app.services import llm, video
+from test.services.test_video import _FakeMoviePyClip as _FakeClip
 
 
 FONTS_DIR = Path(__file__).parent.parent.parent / "resource" / "fonts"
@@ -219,6 +220,80 @@ class TestHeadlineIsBounded(unittest.TestCase):
         ):
             headline = llm.generate_headline(video_subject="주제", video_script="본문")
         self.assertEqual(headline, "세 입 만에 포기?\n닭가슴살 탓이 아니었다")
+
+
+    def test_the_language_value_is_capped_before_it_reaches_the_prompt(self):
+        """`video_language` 는 스키마에서 길이 제한이 없다. 프롬프트에 그대로 실으면 안 된다."""
+        captured = {}
+
+        def fake(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "첫 줄|둘째 줄"
+
+        with patch.object(llm, "_generate_response", side_effect=fake):
+            llm.generate_headline(
+                video_subject="주제", video_script="본문", language="ko" * 10_000
+            )
+        self.assertLess(len(captured["prompt"]), 5_000)
+
+    def test_the_subject_and_script_are_marked_as_data(self):
+        """
+        주제와 대본은 사용자가 쓴 글이다. 규칙과 재료의 경계가 없으면 대본에 적힌
+        문장이 지시로 읽힐 수 있다.
+        """
+        captured = {}
+
+        def fake(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "첫 줄|둘째 줄"
+
+        with patch.object(llm, "_generate_response", side_effect=fake):
+            llm.generate_headline(video_subject="주제", video_script="본문")
+
+        prompt = captured["prompt"]
+        self.assertIn("<subject>\n주제\n</subject>", prompt)
+        self.assertIn("<script>\n본문\n</script>", prompt)
+
+
+class TestHeadlineFontWithoutSubtitles(unittest.TestCase):
+    """자막을 꺼도 헤드라인은 그린다. 그때도 글꼴 경로가 있어야 한다."""
+
+    def test_card_layout_without_subtitles_still_resolves_a_font(self):
+        """
+        글꼴 결정은 자막 분기 안에 있었다. 자막을 끄고 카드 레이아웃을 쓰면 빈
+        경로가 `TextClip` 으로 넘어가 렌더링이 통째로 실패한다.
+        """
+        params = VideoParams(
+            video_subject="test",
+            subtitle_enabled=False,
+            layout="card",
+            headline="첫 줄\n둘째 줄",
+        )
+        source_video = _FakeClip()
+        voice_source = _FakeClip()
+        final_video = _FakeClip()
+        source_video.with_audio_result = final_video
+
+        with (
+            patch.object(video, "_open_video_clip_quietly", return_value=source_video),
+            patch.object(video, "AudioFileClip", return_value=voice_source),
+            patch.object(
+                video, "apply_card_layout", return_value=source_video
+            ) as layout,
+            patch.object(video, "_write_videofile_with_codec_fallback"),
+            patch.object(video, "_get_configured_video_codec", return_value="libx264"),
+        ):
+            video.generate_video(
+                video_path="combined.mp4",
+                audio_path="voice.mp3",
+                subtitle_path="",
+                output_file="final.mp4",
+                params=params,
+            )
+
+        font_path = layout.call_args.args[2]
+        self.assertTrue(font_path, "카드 레이아웃에 빈 글꼴 경로가 넘어갔다")
+        self.assertTrue(Path(font_path).is_file())
 
 
 class TestSubtitlePlacementAndCorners(unittest.TestCase):

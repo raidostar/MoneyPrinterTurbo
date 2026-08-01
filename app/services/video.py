@@ -1301,6 +1301,12 @@ def generate_video(
             params.font_name = DEFAULT_SUBTITLE_FONT
         params.font_name = resolve_subtitle_font(params.font_name, subtitle_path)
         params.font_name, font_path = subtitle_font_path(params.font_name)
+    elif params.layout == "card" and str(getattr(params, "headline", "") or "").strip():
+        # 헤드라인도 글자를 그리므로 글꼴이 필요하다. 자막을 끄면 위에서 아무것도
+        # 정해지지 않아 빈 경로가 `TextClip` 으로 넘어가고 렌더링이 통째로 실패한다.
+        _, font_path = subtitle_font_path(params.font_name or DEFAULT_SUBTITLE_FONT)
+
+    if font_path:
         if os.name == "nt":
             font_path = font_path.replace("\\", "/")
 

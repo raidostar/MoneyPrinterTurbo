@@ -1225,7 +1225,9 @@ def _run_pipeline(
             video_script=video_script,
             language=params.video_language,
         )
-        logger.info(f"headline: {params.headline!r}")
+        # 대본과 같은 등급으로 남긴다. 사용자가 쓴 주제에서 나온 문장이라 INFO 로
+        # 상시 노출할 내용은 아니다.
+        logger.debug(f"headline: {params.headline!r}")
 
     final_video_paths, combined_video_paths, generation_warnings = generate_final_videos(
         task_id,
