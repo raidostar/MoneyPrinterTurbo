@@ -99,3 +99,35 @@ class TestTaskArtifacts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEffectiveFontRecording(unittest.TestCase):
+    """실제로 사용된 자막 글꼴이 작업 기록에 남아야 한다."""
+
+    def test_pipeline_records_the_font_that_was_actually_used(self):
+        """
+        매니페스트는 생성 전에 쓰이는데 글꼴 교체는 생성 중에 일어난다. 요청값만
+        남으면 작업을 다시 불러왔을 때 실제 결과와 어긋난다.
+        """
+        import ast
+        from pathlib import Path
+
+        source = (
+            Path(__file__).parent.parent.parent / "app" / "services" / "task.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        recorded = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if getattr(func, "attr", "") != "patch_script_data":
+                continue
+            if any(kw.arg == "effective_font_name" for kw in node.keywords):
+                recorded = True
+                break
+
+        self.assertTrue(
+            recorded, "실제 사용된 글꼴이 작업 기록에 반영되지 않는다"
+        )

@@ -1226,6 +1226,11 @@ def _run_pipeline(
         audio_duration,
     )
 
+    # 자막 글꼴은 대본을 그릴 수 없을 때 생성 중에 교체된다. 매니페스트는 생성 전에
+    # 쓰이므로 그대로 두면 요청값만 남아, 이 작업을 다시 불러왔을 때 실제로 쓰인
+    # 글꼴과 어긋난다. 실행 결과를 기록해 추적할 수 있게 한다.
+    task_artifacts.patch_script_data(task_id, effective_font_name=params.font_name)
+
     if not final_video_paths:
         return _mark_task_failed(
             task_id,
