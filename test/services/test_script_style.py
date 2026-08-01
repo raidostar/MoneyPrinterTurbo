@@ -5,6 +5,7 @@ import io
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
 import cli
 from streamlit.testing.v1 import AppTest
@@ -165,6 +166,38 @@ class TestWebuiStyleWiring(unittest.TestCase):
                 self.assertIn(
                     "script_style", [kw.arg for kw in call.keywords]
                 )
+
+
+class TestEffectiveStyleIsRecorded(unittest.TestCase):
+    """기록에는 요청값이 아니라 실제로 쓰인 스타일이 남아야 한다."""
+
+    def test_an_unknown_api_value_is_replaced_before_the_manifest_is_written(self):
+        """
+        오타 하나로 작업을 실패시키지는 않는다. 대신 기본 스타일로 쓴다. 그런데
+        요청값을 그대로 기록하면, 나중에 같은 작업을 되살렸을 때 기록된 스타일과
+        실제로 나온 대본이 어긋난다.
+        """
+        from app.models.schema import VideoParams
+        from app.services import task as tm
+
+        params = VideoParams(video_subject="커피", video_script="", script_style="stor")
+
+        with patch.object(tm.llm, "generate_script", return_value="생성된 대본"):
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(params.script_style, llm.DEFAULT_SCRIPT_STYLE)
+
+    def test_a_registered_style_is_left_alone(self):
+        """멀쩡한 값까지 건드리면 고른 스타일이 조용히 사라진다."""
+        from app.models.schema import VideoParams
+        from app.services import task as tm
+
+        params = VideoParams(video_subject="커피", video_script="", script_style="story")
+
+        with patch.object(tm.llm, "generate_script", return_value="생성된 대본"):
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(params.script_style, "story")
 
 
 if __name__ == "__main__":

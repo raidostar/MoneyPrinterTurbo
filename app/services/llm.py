@@ -103,19 +103,25 @@ SCRIPT_STYLE_PROMPTS = {
 DEFAULT_SCRIPT_STYLE = "informative"
 
 
-def script_style_prompt(script_style: str) -> str:
+def resolve_script_style(script_style: str) -> str:
     """
-    스타일 이름을 기본 system prompt 로 바꾼다. 모르는 이름이면 기본값으로 돌아간다.
+    요청된 스타일 이름을 실제로 쓰이는 이름으로 바꾼다. 모르는 이름이면 기본값.
 
     API 나 오래된 설정에서 넘어온 값이 곧바로 대본 생성을 막지 않게 한다. 스타일은
     표현 선택일 뿐이라, 틀린 이름 하나로 영상 생성 전체가 실패할 이유가 없다.
+    호출자는 이 결과를 다시 저장해, 기록과 실제 결과가 어긋나지 않게 한다.
     """
-    prompt = SCRIPT_STYLE_PROMPTS.get(str(script_style or "").strip())
-    if prompt is not None:
-        return prompt
-    if script_style:
-        logger.warning(f"unknown script style, falling back to default: {script_style!r}")
-    return SCRIPT_STYLE_PROMPTS[DEFAULT_SCRIPT_STYLE]
+    name = str(script_style or "").strip()
+    if name in SCRIPT_STYLE_PROMPTS:
+        return name
+    if name:
+        logger.warning(f"unknown script style, falling back to default: {name!r}")
+    return DEFAULT_SCRIPT_STYLE
+
+
+def script_style_prompt(script_style: str) -> str:
+    """스타일 이름에 해당하는 기본 system prompt."""
+    return SCRIPT_STYLE_PROMPTS[resolve_script_style(script_style)]
 
 
 # 제공자가 응답 본문에 그대로 실어 보내는 '일일 한도 소진' 문구.
