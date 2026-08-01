@@ -255,6 +255,52 @@ class TestHeadlineIsBounded(unittest.TestCase):
         self.assertIn("<script>\n본문\n</script>", prompt)
 
 
+class TestMalformedHeadlineResponse(unittest.TestCase):
+    """모델이 서식 금지 규칙을 어겨도 그대로 렌더링되면 안 된다."""
+
+    def test_markdown_and_hashtags_are_stripped(self):
+        """`**SALE**|#클릭` 이 그대로 큰 글자로 그려지고 매니페스트에도 남는다."""
+        with patch.object(llm, "_generate_response", return_value="**SALE**|#클릭"):
+            headline = llm.generate_headline(video_subject="주제", video_script="본문")
+
+        self.assertEqual(headline, "SALE\n클릭")
+
+
+class TestFullHeightCardKeepsItsMargins(unittest.TestCase):
+    """비율 1.0 은 스키마가 받는 값이다. 그때도 얹을 것이 있으면 자리가 있어야 한다."""
+
+    def test_a_headline_is_not_drawn_over_the_footage(self):
+        """
+        여백을 비율로만 정하면 1.0 에서 0 이 된다. 헤드라인이 영상 위로 올라가
+        카드 레이아웃이 전체화면으로 무너진다.
+        """
+        source = ColorClip(size=(1080, 1920), color=(30, 90, 200)).with_duration(2)
+        params = _params(layout_video_height_ratio=1.0)
+        params.headline = "첫 줄|둘째 줄".replace("|", "\n")
+        font = str(Path("resource/fonts/Pretendard-Bold.ttf").resolve())
+        try:
+            composed = video.apply_card_layout(source, params, font)
+            frame = composed.get_frame(0)
+            # 맨 윗줄은 헤드라인이 놓일 여백이라 배경색이어야 한다.
+            self.assertEqual(list(frame[0, 540]), [255, 255, 255])
+        finally:
+            composed.close()
+            source.close()
+
+    def test_room_is_left_below_for_the_subtitle(self):
+        """아래 자막을 켜면 자막이 놓일 아래쪽 여백도 남아야 한다."""
+        source = ColorClip(size=(1080, 1920), color=(30, 90, 200)).with_duration(2)
+        params = _params(layout_video_height_ratio=1.0)
+        params.subtitle_below_video = True
+        try:
+            composed = video.apply_card_layout(source, params)
+            frame = composed.get_frame(0)
+            self.assertEqual(list(frame[1919, 540]), [255, 255, 255])
+        finally:
+            composed.close()
+            source.close()
+
+
 class TestHeadlinePromptBoundary(unittest.TestCase):
     """재료 안의 문자열이 데이터 구간을 빠져나가면 안 된다."""
 

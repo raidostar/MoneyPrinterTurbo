@@ -1129,6 +1129,23 @@ def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
     ).with_duration(duration)
 
 
+def _reserved_margin(params, headline_clip) -> int:
+    """
+    영상 위아래에 반드시 비워 둬야 하는 높이를 잰다.
+
+    비율만 믿으면 1.0 을 받았을 때 여백이 0 이 되어, 헤드라인은 영상 위에 겹치고
+    아래 자막은 화면 밖으로 밀린다. 영상은 캔버스 중앙에 놓이므로 위아래 여백이
+    같고, 둘 중 큰 쪽만 확보하면 양쪽 다 확보된다.
+    """
+    reserved = 0
+    if headline_clip is not None:
+        reserved = max(reserved, headline_clip.h)
+    if _subtitle_below_video_enabled(params):
+        # 자막은 이 함수보다 나중에 만들어져 높이를 잴 수 없다. 두 줄 기준으로 잡는다.
+        reserved = max(reserved, int(params.font_size * 2.4))
+    return reserved
+
+
 def _rounded_mask(width: int, height: int, radius: int, duration: float):
     """영상 모서리를 깎을 알파 마스크를 만든다."""
     from moviepy import ImageClip
@@ -1155,9 +1172,12 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
     영상처럼 보이므로, 가로를 채우고 높이를 잘라 띠 모양을 유지한다.
     """
     canvas_width, canvas_height = video_clip.size
+    headline = _headline_clip(params, font_path, canvas_width, video_clip.duration)
     target_height = min(
-        int(canvas_height * params.layout_video_height_ratio), canvas_height
+        int(canvas_height * params.layout_video_height_ratio),
+        canvas_height - 2 * _reserved_margin(params, headline),
     )
+    target_height = max(1, min(target_height, canvas_height))
 
     scale = canvas_width / video_clip.w
     scaled = video_clip.resized(
@@ -1182,7 +1202,6 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
 
     layers = [background, scaled.with_position("center")]
 
-    headline = _headline_clip(params, font_path, canvas_width, video_clip.duration)
     if headline is not None:
         # 영상 위쪽 여백의 세로 중앙에 놓는다. 여백보다 문구가 길면 영상을 덮게 되는데,
         # 그때는 위쪽에 붙여 최소한 잘리지 않게 한다.

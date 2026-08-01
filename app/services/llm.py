@@ -750,6 +750,22 @@ def _as_prompt_data(text: str) -> str:
     return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+_HEADLINE_FORMATTING_CHARS = "*_`~#"
+
+
+def _strip_headline_formatting(text: str) -> str:
+    """
+    프롬프트가 금지한 서식 문자를 지운다.
+
+    모델이 규칙을 어기면 `**SALE**` 이나 `#할인` 이 그대로 큰 글자로 렌더링되고
+    매니페스트에도 그대로 남는다. 문구 자체를 버리기에는 아까우니 서식만 걷어낸다.
+    """
+    cleaned = "".join(
+        char for char in str(text or "") if char not in _HEADLINE_FORMATTING_CHARS
+    )
+    return " ".join(cleaned.split())
+
+
 def _wrap_headline(text: str) -> str:
     """
     공백에서 접어 두 줄까지 만들고, 줄마다 길이를 잘라 폭을 지킨다.
@@ -823,9 +839,9 @@ def generate_headline(
     # `_generate_response` 는 대본용이라 반환값에서 개행을 모두 제거한다. 두 줄을
     # 유지하려면 개행이 아닌 구분자를 쓸 수밖에 없다.
     lines = [
-        segment.strip().strip('"').strip("'")
+        cleaned
         for segment in text.split("|", HEADLINE_LINES)[:HEADLINE_LINES]
-        if segment.strip()
+        if (cleaned := _strip_headline_formatting(segment.strip('"').strip("'")))
     ]
     if not lines:
         logger.warning("headline generation returned nothing, using fallback")
