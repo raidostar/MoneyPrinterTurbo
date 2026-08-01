@@ -1228,6 +1228,10 @@ def _run_pipeline(
         # 헤드라인은 주제와 대본에서 나온 문장이라 그 안의 내용이 그대로 딸려온다.
         # 만들어졌는지만 남기고 본문은 로그에 쓰지 않는다.
         logger.info(f"headline generated: {len(params.headline)} characters")
+        # 매니페스트는 헤드라인이 만들어지기 전에 쓰인다. 그리기 전에 보완해 두지
+        # 않으면 영상에는 문구가 있는데 기록에는 빈 값이 남고, 같은 작업을 다시
+        # 돌릴 때마다 다른 문구가 나온다.
+        task_artifacts.patch_script_data(task_id, headline=params.headline)
 
     final_video_paths, combined_video_paths, generation_warnings = generate_final_videos(
         task_id,
