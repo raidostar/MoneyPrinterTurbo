@@ -115,7 +115,11 @@ def resolve_script_style(script_style: str) -> str:
     if name in SCRIPT_STYLE_PROMPTS:
         return name
     if name:
-        logger.warning(f"unknown script style, falling back to default: {name!r}")
+        # 값 자체는 남기지 않는다. API 로 들어온 문자열이라 무엇이 담겨 있을지 모른다.
+        logger.warning(
+            f"unknown script style ({len(name)} characters), falling back to "
+            f"{DEFAULT_SCRIPT_STYLE}"
+        )
     return DEFAULT_SCRIPT_STYLE
 
 

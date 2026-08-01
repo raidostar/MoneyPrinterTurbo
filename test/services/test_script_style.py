@@ -44,6 +44,27 @@ class TestScriptStyleSelection(unittest.TestCase):
         self.assertIn("내가 쓴 규칙", prompt)
         self.assertNotIn(llm.STORY_SCRIPT_SYSTEM_PROMPT, prompt)
 
+    def test_an_unknown_style_is_not_written_into_the_log(self):
+        """
+        스타일 이름은 API 로 들어온다. 무엇이 담겨 있을지 모르는 문자열을 그대로
+        로그에 남기면 안 된다.
+        """
+        with patch.object(llm.logger, "warning") as warning:
+            llm.resolve_script_style("sk-secret-token-value")
+
+        warning.assert_called_once()
+        self.assertNotIn("sk-secret-token-value", warning.call_args.args[0])
+
+    def test_the_style_field_is_length_bounded(self):
+        """상한이 없으면 거대한 문자열이 그대로 요청에 실려 들어온다."""
+        from pydantic import ValidationError
+
+        from app.models.schema import VideoParams, VideoScriptRequest
+
+        for model in (VideoParams, VideoScriptRequest):
+            with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
+                model(video_subject="x", script_style="s" * 5_000)
+
     def test_an_unknown_style_falls_back_instead_of_failing(self):
         """
         스타일은 표현 선택일 뿐이다. 예전 설정이나 API 오타 하나로 영상 생성 전체가

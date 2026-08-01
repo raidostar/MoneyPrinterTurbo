@@ -144,7 +144,8 @@ class VideoParams(BaseModel):
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
     # 대본 어조. 직접 쓴 custom_system_prompt 가 있으면 그쪽이 이긴다.
-    script_style: str = "informative"
+    # 등록된 이름만 의미가 있으므로 길이를 넉넉한 상한으로 묶어 둔다.
+    script_style: str = Field(default="informative", max_length=32)
 
 
 class SubtitleRequest(BaseModel):
@@ -197,7 +198,7 @@ class VideoScriptParams:
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
-    script_style: str = "informative"
+    script_style: str = Field(default="informative", max_length=32)
 
 
 class VideoTermsParams:
