@@ -115,6 +115,14 @@ class VideoParams(BaseModel):
     text_background_color: Union[bool, str] = False
     rounded_subtitle_background: bool = False
 
+    # 쇼츠 템플릿 레이아웃. "fullscreen" 은 기존 동작(영상이 화면을 꽉 채움)이고,
+    # "card" 는 영상을 축소해 배경 캔버스 위에 얹어, 위아래로 헤드라인과 자막을
+    # 놓을 여백을 만든다. 유튜브 쇼츠에서 흔한 구성이다.
+    layout: Optional[str] = "fullscreen"
+    layout_background_color: str = "#FFFFFF"
+    # 영상이 차지할 세로 비율. 0.55 면 화면 높이의 55% 를 영상이 쓰고 나머지가 여백이다.
+    layout_video_height_ratio: float = Field(default=0.55, ge=0.3, le=1.0)
+
     font_size: int = 60
     stroke_color: Optional[str] = "#000000"
     stroke_width: float = 1.5
