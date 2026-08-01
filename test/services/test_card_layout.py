@@ -173,3 +173,49 @@ class TestHeadline(unittest.TestCase):
             plain.close()
             with_headline.close()
             source.close()
+
+
+class TestSubtitlePlacementAndCorners(unittest.TestCase):
+    """자막 여백 배치와 둥근 모서리."""
+
+    def test_below_video_only_applies_to_the_card_layout(self):
+        """전체화면에는 여백이 없다. 옵션만 켜고 레이아웃이 아니면 무시해야 한다."""
+        params = _params(layout="fullscreen")
+        params.subtitle_below_video = True
+        self.assertFalse(video._subtitle_below_video_enabled(params))
+
+        params.layout = "card"
+        self.assertTrue(video._subtitle_below_video_enabled(params))
+
+    def test_subtitle_color_changes_when_it_moves_off_the_video(self):
+        """
+        기본 자막색은 흰색이다. 흰 배경 여백으로 옮기면 그대로 사라지므로 색도
+        함께 바뀌어야 한다.
+        """
+        params = _params()
+        params.text_fore_color = "#FFFFFF"
+        params.subtitle_below_color = "#111111"
+
+        self.assertEqual(video._subtitle_color(params), "#FFFFFF")
+
+        params.subtitle_below_video = True
+        self.assertEqual(video._subtitle_color(params), "#111111")
+
+    def test_rounded_corners_make_the_corner_show_the_background(self):
+        """모서리를 깎으면 그 자리에 배경이 비쳐야 한다."""
+        source = ColorClip(size=(1080, 1920), color=(30, 90, 200)).with_duration(2)
+        square = _params(layout_video_height_ratio=0.5)
+        rounded = _params(layout_video_height_ratio=0.5)
+        rounded.layout_corner_radius = 80
+        try:
+            a = video.apply_card_layout(source, square)
+            b = video.apply_card_layout(source, rounded)
+            top = (1920 - int(1920 * 0.5)) // 2
+
+            # 영상 좌상단 모서리 안쪽 픽셀
+            self.assertEqual(list(a.get_frame(0)[top + 3, 3]), [30, 90, 200])
+            self.assertEqual(list(b.get_frame(0)[top + 3, 3]), [255, 255, 255])
+        finally:
+            a.close()
+            b.close()
+            source.close()

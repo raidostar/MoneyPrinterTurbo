@@ -1084,6 +1084,26 @@ def _font_path_within_bundle(font_name: str) -> str:
         return ""
 
 
+def _subtitle_color(params) -> str:
+    """
+    자막 글자색을 고른다. 여백 위에 놓일 때는 별도 색을 쓴다.
+
+    기본 자막색은 흰색이라 영상 위에서는 잘 보이지만, card 레이아웃의 흰 배경
+    여백으로 옮기면 그대로 사라진다. 배치가 바뀌면 색도 함께 바뀌어야 한다.
+    """
+    if _subtitle_below_video_enabled(params):
+        return str(getattr(params, "subtitle_below_color", "") or params.text_fore_color)
+    return params.text_fore_color
+
+
+def _subtitle_below_video_enabled(params) -> bool:
+    """자막을 영상 밖 여백에 놓을지 판정한다. card 레이아웃에서만 의미가 있다."""
+    return bool(
+        getattr(params, "subtitle_below_video", False)
+        and getattr(params, "layout", "fullscreen") == "card"
+    )
+
+
 def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
     """
     상단 여백에 얹을 두 줄 헤드라인 클립을 만든다. 문구가 없으면 ``None``.
@@ -1106,6 +1126,19 @@ def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
         size=(int(canvas_width * 0.92), None),
         method="caption",
         text_align="center",
+    ).with_duration(duration)
+
+
+def _rounded_mask(width: int, height: int, radius: int, duration: float):
+    """영상 모서리를 깎을 알파 마스크를 만든다."""
+    from moviepy import ImageClip
+
+    canvas = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(canvas).rounded_rectangle(
+        (0, 0, width - 1, height - 1), radius=radius, fill=255
+    )
+    return ImageClip(
+        np.array(canvas).astype(float) / 255.0, is_mask=True
     ).with_duration(duration)
 
 
@@ -1139,6 +1172,13 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
         size=(canvas_width, canvas_height),
         color=_hex_to_rgb(params.layout_background_color),
     ).with_duration(video_clip.duration)
+
+    radius = int(getattr(params, "layout_corner_radius", 0) or 0)
+    if radius > 0:
+        # 마스크는 클립과 크기가 같아야 한다. 크롭 이후 크기를 써야 어긋나지 않는다.
+        scaled = scaled.with_mask(
+            _rounded_mask(scaled.w, scaled.h, radius, video_clip.duration)
+        )
 
     layers = [background, scaled.with_position("center")]
 
@@ -1334,7 +1374,7 @@ def generate_video(
                 text=wrapped_txt,
                 font=font_path,
                 font_size=params.font_size,
-                color=params.text_fore_color,
+                color=_subtitle_color(params),
                 bg_color=None,
                 stroke_color=params.stroke_color,
                 stroke_width=params.stroke_width,
@@ -1365,7 +1405,7 @@ def generate_video(
                 text=wrapped_txt,
                 font=font_path,
                 font_size=params.font_size,
-                color=params.text_fore_color,
+                color=_subtitle_color(params),
                 bg_color=None,
                 stroke_color=params.stroke_color,
                 stroke_width=params.stroke_width,
@@ -1396,7 +1436,7 @@ def generate_video(
                 text=wrapped_txt,
                 font=font_path,
                 font_size=params.font_size,
-                color=params.text_fore_color,
+                color=_subtitle_color(params),
                 bg_color=None,
                 stroke_color=params.stroke_color,
                 stroke_width=params.stroke_width,
@@ -1408,7 +1448,17 @@ def generate_video(
         _clip = _clip.with_start(subtitle_item[0][0])
         _clip = _clip.with_end(subtitle_item[0][1])
         _clip = _clip.with_duration(duration)
-        if params.subtitle_position == "bottom":
+        if _subtitle_below_video_enabled(params):
+            # 영상 아래 여백의 세로 중앙에 놓는다. 영상 위가 아니라 배경 위이므로
+            # 화면을 가리지 않는다. 여백보다 자막이 길면 화면 밖으로 나가지 않게
+            # 아래 끝에 맞춘다.
+            band_height = int(video_height * params.layout_video_height_ratio)
+            bottom_margin_top = (video_height + band_height) // 2
+            available = video_height - bottom_margin_top
+            _clip = _clip.with_position(
+                ("center", bottom_margin_top + max(0, (available - _clip.h) // 2))
+            )
+        elif params.subtitle_position == "bottom":
             _clip = _clip.with_position(("center", video_height * 0.95 - _clip.h))
         elif params.subtitle_position == "top":
             _clip = _clip.with_position(("center", video_height * 0.05))
