@@ -1129,6 +1129,20 @@ def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
     ).with_duration(duration)
 
 
+def _subtitle_below_position(
+    canvas_height: int, card_band_height: int, clip_height: int
+) -> int:
+    """
+    영상 아래 여백의 세로 중앙 좌표. 여백보다 자막이 크면 여백 위쪽에 붙인다.
+
+    요청 비율이 아니라 실제로 놓인 띠 높이를 받아야 한다. 여백 확보 때문에 띠가
+    더 줄어들 수 있고, 비율로 계산하면 그만큼 자막이 아래로 밀려 화면 밖으로 나간다.
+    """
+    bottom_margin_top = (canvas_height + card_band_height) // 2
+    available = canvas_height - bottom_margin_top
+    return bottom_margin_top + max(0, (available - clip_height) // 2)
+
+
 def _reserved_margin(params, headline_clip) -> int:
     """
     영상 위아래에 반드시 비워 둬야 하는 높이를 잰다.
@@ -1170,6 +1184,10 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
     영상은 가로를 캔버스에 꽉 채우고, 목표 높이를 넘는 만큼은 위아래를 잘라 낸다.
     세로 소재를 높이에 맞춰 줄이면 좌우로도 여백이 생겨 카드가 아니라 그냥 작아진
     영상처럼 보이므로, 가로를 채우고 높이를 잘라 띠 모양을 유지한다.
+
+    ``(합성된 클립, 영상 띠의 실제 높이)`` 를 돌려준다. 요청 비율만으로는 자막을
+    놓을 수 없다. 여백 확보 때문에 띠가 더 줄어들 수 있어, 실제 높이를 받아야
+    자막이 여백 안에 들어간다.
     """
     canvas_width, canvas_height = video_clip.size
     headline = _headline_clip(params, font_path, canvas_width, video_clip.duration)
@@ -1201,6 +1219,7 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
         )
 
     layers = [background, scaled.with_position("center")]
+    band_height = scaled.h
 
     if headline is not None:
         # 영상 위쪽 여백의 세로 중앙에 놓는다. 여백보다 문구가 길면 영상을 덮게 되는데,
@@ -1209,7 +1228,7 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
         y = max(0, (top_margin - headline.h) // 2)
         layers.append(headline.with_position(("center", y)))
 
-    return CompositeVideoClip(layers)
+    return CompositeVideoClip(layers), band_height
 
 
 def subtitle_font_path(font_name: str) -> tuple[str, str]:
@@ -1477,11 +1496,13 @@ def generate_video(
             # 영상 아래 여백의 세로 중앙에 놓는다. 영상 위가 아니라 배경 위이므로
             # 화면을 가리지 않는다. 여백보다 자막이 길면 화면 밖으로 나가지 않게
             # 아래 끝에 맞춘다.
-            band_height = int(video_height * params.layout_video_height_ratio)
-            bottom_margin_top = (video_height + band_height) // 2
-            available = video_height - bottom_margin_top
             _clip = _clip.with_position(
-                ("center", bottom_margin_top + max(0, (available - _clip.h) // 2))
+                (
+                    "center",
+                    _subtitle_below_position(
+                        video_height, card_band_height, _clip.h
+                    ),
+                )
             )
         elif params.subtitle_position == "bottom":
             _clip = _clip.with_position(("center", video_height * 0.95 - _clip.h))
@@ -1511,10 +1532,13 @@ def generate_video(
         )
         voice_source_clip = clip_stack.enter_context(AudioFileClip(audio_path))
         video_clip = source_video_clip
+        card_band_height = 0
         if params.layout == "card":
             # 자막보다 먼저 적용한다. 자막 위치는 캔버스 높이를 기준으로 계산되므로,
             # 레이아웃을 나중에 씌우면 자막이 영상 안쪽에 갇힌다.
-            video_clip = apply_card_layout(video_clip, params, font_path)
+            video_clip, card_band_height = apply_card_layout(
+                video_clip, params, font_path
+            )
             clip_stack.callback(video_clip.close)
         audio_clip = voice_source_clip.with_effects(
             [afx.MultiplyVolume(params.voice_volume)]

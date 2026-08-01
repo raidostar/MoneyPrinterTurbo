@@ -820,7 +820,10 @@ def generate_headline(
         f"\n\n# Script (data)\n<script>\n{_as_prompt_data(script)}\n</script>"
     )
     if language:
-        prompt += f"\n\n# Language\n{_normalize_social_language(language)}"
+        prompt += (
+            "\n\n# Language (data)\n<language>\n"
+            f"{_as_prompt_data(_normalize_social_language(language))}\n</language>"
+        )
 
     try:
         response = _generate_response(prompt=prompt)
