@@ -1225,9 +1225,9 @@ def _run_pipeline(
             video_script=video_script,
             language=params.video_language,
         )
-        # 대본과 같은 등급으로 남긴다. 사용자가 쓴 주제에서 나온 문장이라 INFO 로
-        # 상시 노출할 내용은 아니다.
-        logger.debug(f"headline: {params.headline!r}")
+        # 헤드라인은 주제와 대본에서 나온 문장이라 그 안의 내용이 그대로 딸려온다.
+        # 만들어졌는지만 남기고 본문은 로그에 쓰지 않는다.
+        logger.info(f"headline generated: {len(params.headline)} characters")
 
     final_video_paths, combined_video_paths, generation_warnings = generate_final_videos(
         task_id,

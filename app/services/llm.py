@@ -739,6 +739,17 @@ text pinned above the footage. It is not the narration and not a title card.
 """.strip()
 
 
+def _as_prompt_data(text: str) -> str:
+    """
+    재료를 데이터 구간 안에 안전하게 넣는다.
+
+    구분자를 태그 모양으로 쓰면 재료 안에 똑같은 문자열이 들어 있을 때 경계가
+    깨진다. 꺾쇠를 이스케이프해 재료 쪽에서는 어떤 태그도 만들 수 없게 한다.
+    산문에서 꺾쇠가 의미를 갖는 경우는 없으므로 잃는 것이 없다.
+    """
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _wrap_headline(text: str) -> str:
     """
     공백에서 접어 두 줄까지 만들고, 줄마다 길이를 잘라 폭을 지킨다.
@@ -789,8 +800,8 @@ def generate_headline(
     # 다른 곳과 같은 길이 제한을 태운다.
     prompt = DEFAULT_HEADLINE_SYSTEM_PROMPT.format(max_line=MAX_HEADLINE_LINE_LENGTH)
     prompt += (
-        f"\n\n# Video subject (data)\n<subject>\n{subject}\n</subject>"
-        f"\n\n# Script (data)\n<script>\n{script}\n</script>"
+        f"\n\n# Video subject (data)\n<subject>\n{_as_prompt_data(subject)}\n</subject>"
+        f"\n\n# Script (data)\n<script>\n{_as_prompt_data(script)}\n</script>"
     )
     if language:
         prompt += f"\n\n# Language\n{_normalize_social_language(language)}"
