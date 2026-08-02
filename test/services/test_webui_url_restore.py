@@ -1,0 +1,108 @@
+"""주소로 지난 작업 설정 불러오기."""
+
+import json
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from streamlit.testing.v1 import AppTest
+
+WEBUI_MAIN = str(Path("webui") / "Main.py")
+
+TASK_ID = "url-restore-task"
+SCRIPT_DATA = {
+    "script": "200번째 닭가슴살을 씹다가 휴지통 앞에서 울컥했다.",
+    "search_terms": ["chicken breast"],
+    "params": {
+        "video_subject": "닭가슴살 200개 먹고 나서야 알게 된 것",
+        "video_language": "ko-KR",
+        "script_style": "story",
+        "layout": "card",
+        "headline": "200개째 깨달았다\n문제는 닭이 아니었다",
+        # 저장된 설정이나 기본값과 우연히 같으면, 불러오지 않아도 테스트가 통과한다.
+        "layout_video_height_ratio": 0.42,
+        "layout_corner_radius": 12,
+        "headline_font_size": 64,
+    },
+}
+
+
+def _app_with_task(tmp_path, query):
+    task_dir = Path(tmp_path) / TASK_ID
+    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / "script.json").write_text(
+        json.dumps(SCRIPT_DATA, ensure_ascii=False), encoding="utf-8"
+    )
+    app = AppTest.from_file(WEBUI_MAIN, default_timeout=60)
+    app.session_state["ui_language"] = "ko"
+    app.query_params.update(query)
+    with patch("app.utils.utils.task_dir", return_value=str(tmp_path)):
+        app.run()
+    return app
+
+
+class TestRestoreFromUrl(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_opening_with_a_task_id_fills_the_form(self):
+        """
+        '다시 생성 → 설정 불러오기' 를 누르는 것과 같은 일을 주소로 한다. 만들어 둔
+        영상을 손보려고 화면을 열 때, 대본을 다시 붙여넣게 하지 않기 위해서다.
+        """
+        app = _app_with_task(self.tmp_path, {"task": TASK_ID})
+
+        self.assertEqual(
+            app.session_state["video_subject"], SCRIPT_DATA["params"]["video_subject"]
+        )
+        self.assertEqual(app.session_state["video_script"], SCRIPT_DATA["script"])
+        self.assertEqual(app.session_state["headline_input"], "200개째 깨달았다\n문제는 닭이 아니었다")
+
+    def test_the_template_comes_along_with_it(self):
+        """대본만 돌아오고 화면 구성이 기본값이면 같은 영상이 나오지 않는다."""
+        app = _app_with_task(self.tmp_path, {"task": TASK_ID})
+
+        self.assertEqual(app.session_state["layout_select_ko"], "card")
+        self.assertAlmostEqual(
+            app.session_state["layout_video_height_ratio_slider"], 0.42
+        )
+        self.assertEqual(app.session_state["layout_corner_radius_slider"], 12)
+        self.assertEqual(app.session_state["headline_font_size_slider"], 64)
+
+    def test_without_the_parameter_nothing_is_filled(self):
+        """주소에 작업이 없으면 평소처럼 빈 화면으로 시작해야 한다."""
+        app = _app_with_task(self.tmp_path, {})
+        self.assertEqual(app.session_state["video_subject"], "")
+
+    def test_an_unknown_task_does_not_break_the_page(self):
+        """오래된 링크나 지워진 작업 하나로 화면 전체가 뜨지 않으면 안 된다."""
+        app = _app_with_task(self.tmp_path, {"task": "does-not-exist"})
+        self.assertEqual(app.session_state["video_subject"], "")
+        self.assertFalse(app.exception)
+
+    def test_a_traversal_path_is_refused(self):
+        """작업 이름은 주소에서 온다. 작업 디렉터리 밖을 가리키면 안 된다."""
+        app = _app_with_task(self.tmp_path, {"task": "../../etc"})
+        self.assertEqual(app.session_state["video_subject"], "")
+        self.assertFalse(app.exception)
+
+    def test_edits_are_not_overwritten_on_the_next_rerun(self):
+        """
+        rerun 마다 다시 채우면, 불러온 대본을 고치는 순간 원래 내용으로 되돌아간다.
+        """
+        app = _app_with_task(self.tmp_path, {"task": TASK_ID})
+        app.session_state["video_subject"] = "내가 고친 주제"
+        with patch("app.utils.utils.task_dir", return_value=str(self.tmp_path)):
+            app.run()
+
+        self.assertEqual(app.session_state["video_subject"], "내가 고친 주제")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -897,6 +897,31 @@ def _set_stable_widget_value(key, value):
         st.session_state[localized_widget_key(key)] = value
 
 
+def _queue_task_restore_from_url():
+    """
+    ``?task=<id>`` 로 열면 그 작업의 설정을 바로 채운다.
+
+    작업 관리자에서 '다시 생성' 을 누르는 것과 같은 일을 주소로 한다. 만들어 둔
+    영상을 손보려고 화면을 여는 흐름에서는 대본과 설정이 이미 들어와 있는 편이
+    자연스럽고, 링크로 남겨 둘 수도 있다.
+
+    한 번만 적용한다. rerun 마다 다시 채우면 사용자가 고친 내용을 계속 덮어쓴다.
+    """
+    task_id = str(st.query_params.get("task", "") or "").strip()
+    if not task_id or st.session_state.get("url_task_restore_applied") == task_id:
+        return
+
+    st.session_state["url_task_restore_applied"] = task_id
+    payload = _load_task_restore_payload(task_id)
+    if not payload:
+        # 경로 검증과 파싱은 로더가 한다. 여기서는 조용히 넘어가, 잘못된 주소
+        # 하나로 화면 전체가 뜨지 않는 일을 만들지 않는다.
+        logger.warning(f"cannot restore task from url: {task_id}")
+        return
+
+    st.session_state["task_restore_payload"] = payload
+
+
 def _apply_pending_task_restore():
     payload = st.session_state.pop("task_restore_payload", None)
     if not payload:
@@ -4200,6 +4225,7 @@ def _render_application():
     if st.session_state.get("settings_dialog_open", False):
         _render_settings_dialog()
 
+    _queue_task_restore_from_url()
     restore_applied = _apply_pending_task_restore()
     restore_candidate_id = st.session_state.get("task_restore_candidate_id")
     if restore_candidate_id:
