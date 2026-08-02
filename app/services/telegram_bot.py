@@ -9,6 +9,7 @@
 대본에 그 시간을 쓰기 전에 멈출 수 있어야 한다.
 """
 
+import json
 import os
 import threading
 import time
@@ -34,6 +35,10 @@ MAX_SUBJECT_LENGTH = 200
 # 같은 상한을 받아야 한다. 그 위에 텔레그램 메시지 한도(4096자)가 더 좁은 제약이다.
 # 대본 전문과 글자 수를 한 메시지에 실어 버튼을 붙이므로, 넘으면 승인할 방법이 없어진다.
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
+# 응답도 외부 입력이다. 통째로 메모리에 올리기 전에 크기를 끊는다.
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+# getUpdates 가 한 번에 돌려줄 업데이트 수. 텔레그램 상한은 100 이다.
+MAX_UPDATES_PER_POLL = 20
 MAX_SCRIPT_LENGTH = 3500
 
 
@@ -68,9 +73,17 @@ def _call(method: str, **payload) -> dict[str, Any] | None:
     """
     try:
         response = requests.post(
-            _api_url(method), json=payload, timeout=REQUEST_TIMEOUT_SECONDS
+            _api_url(method),
+            json=payload,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            stream=True,
         )
-        body = response.json()
+        with response:
+            raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            logger.warning(f"telegram {method} returned an oversized body")
+            return None
+        body = json.loads(raw)
     except Exception as exc:
         logger.warning(f"telegram {method} failed: {type(exc).__name__}")
         return None
@@ -219,7 +232,12 @@ class ShortsBot:
                 return
             _send_video(self.chat_id, videos[0], caption=subject)
         except Exception as exc:
-            logger.exception(f"telegram render failed: {task_id}")
+            # 파이프라인 전체를 감싸므로 제공자 예외가 그대로 올라온다. 그 메시지에는
+            # 자격 증명이 붙은 주소가 섞일 수 있어, 트레이스백째로 남기지 않는다.
+            logger.error(
+                f"telegram render failed: {task_id}, "
+                f"{type(exc).__name__}: {llm.sanitize_error_message(exc)}"
+            )
             _send(self.chat_id, f"영상 생성 중 오류가 났어요: {type(exc).__name__}")
         finally:
             with self._lock:
@@ -328,7 +346,10 @@ class ShortsBot:
 
     def poll_once(self) -> None:
         updates = _call(
-            "getUpdates", offset=self.offset, timeout=POLL_TIMEOUT_SECONDS
+            "getUpdates",
+            offset=self.offset,
+            timeout=POLL_TIMEOUT_SECONDS,
+            limit=MAX_UPDATES_PER_POLL,
         )
         if not isinstance(updates, list):
             return

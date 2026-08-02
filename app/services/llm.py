@@ -515,6 +515,11 @@ def _generate_response(prompt: str) -> str:
         return f"Error: {_sanitize_error_message(e)}"
 
 
+# 제공자 예외 메시지에서 자격 증명을 지우는 일은 LLM 만의 문제가 아니다. 텔레그램
+# 봇처럼 파이프라인 전체를 감싸 로그를 남기는 곳도 같은 처리가 필요하다.
+sanitize_error_message = _sanitize_error_message
+
+
 def test_connection() -> tuple[bool, str, float]:
     """
     현재 Provider 설정으로 최소한의 요청을 한 번 보내, 실제 생성 경로가 동작하는지 확인한다.

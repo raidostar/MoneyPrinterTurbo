@@ -262,6 +262,36 @@ class TestNonPrivateChats(unittest.TestCase):
         generate.assert_not_called()
 
 
+class TestResponseSize(unittest.TestCase):
+    def test_an_oversized_body_is_dropped_before_it_is_parsed(self):
+        """
+        응답은 외부 입력이다. 통째로 메모리에 올려 파싱하면, 거대한 본문 하나로
+        이 기계가 흔들린다.
+        """
+        huge = b'{"ok": true, "result": "' + b"x" * (bot.MAX_RESPONSE_BYTES + 10) + b'"}'
+
+        with patch.object(bot.requests, "post") as post:
+            response = post.return_value
+            response.__enter__ = lambda self_: self_
+            response.__exit__ = lambda *a: False
+            response.raw.read.return_value = huge
+            result = bot._call("getUpdates")
+
+        self.assertIsNone(result)
+        # 크기를 넘겼는지 알 수 있을 만큼만 읽어야 한다.
+        self.assertEqual(
+            response.raw.read.call_args.args[0], bot.MAX_RESPONSE_BYTES + 1
+        )
+
+    def test_the_poller_asks_for_a_bounded_batch(self):
+        """한 번에 받는 업데이트 수에 상한이 없으면 배치 하나가 그대로 부하가 된다."""
+        shorts = bot.ShortsBot()
+        with patch.object(bot, "_call", return_value=[]) as call:
+            shorts.poll_once()
+
+        self.assertLessEqual(call.call_args.kwargs["limit"], 100)
+
+
 class TestSecrets(unittest.TestCase):
     def test_a_failed_call_does_not_log_the_token(self):
         """
@@ -279,6 +309,26 @@ class TestSecrets(unittest.TestCase):
         self.assertIsNone(result)
         warning.assert_called_once()
         self.assertNotIn("SECRET-TOKEN", warning.call_args.args[0])
+
+    def test_a_render_failure_does_not_log_provider_credentials(self):
+        """
+        렌더링은 LLM·TTS·스톡 영상 제공자를 모두 거친다. 그 예외 메시지에는 자격
+        증명이 붙은 주소가 섞일 수 있어, 트레이스백째로 남기면 그대로 로그에 남는다.
+        """
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        leaky = RuntimeError("failed: https://user:hunter2@api.example.com/v1")
+
+        with patch.object(bot, "_send"), patch.object(
+            bot.tm, "start", side_effect=leaky
+        ), patch.object(bot.logger, "error") as error, patch.object(
+            bot.logger, "exception"
+        ) as exception:
+            shorts._render("주제", "대본")
+
+        exception.assert_not_called()
+        error.assert_called_once()
+        self.assertNotIn("hunter2", error.call_args.args[0])
 
 
 if __name__ == "__main__":
