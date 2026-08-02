@@ -1652,3 +1652,23 @@ class TestSearchTermsAreBounded(unittest.TestCase):
             llm.generate_terms("주제", "가" * 500_000, amount=1)
 
         self.assertLess(len(captured["prompt"]), 50_000)
+
+    def test_a_huge_amount_does_not_allocate_before_the_model_is_called(self):
+        """
+        요청 개수는 프롬프트 예시를 만들 때 `range()` 에 들어간다. 상한이 없으면
+        모델을 부르기도 전에 그 자리에서 메모리를 태운다.
+        """
+        captured = {}
+
+        def fake(prompt, **_):
+            captured["prompt"] = prompt
+            return '["cafe sign"]'
+
+        with patch.object(llm, "_generate_response", side_effect=fake):
+            terms = llm.generate_terms(
+                "주제", "본문", amount=1_000_000_000, match_script_order=True
+            )
+
+        self.assertLess(len(captured["prompt"]), 20_000)
+        self.assertEqual(terms, ["cafe sign"])
+

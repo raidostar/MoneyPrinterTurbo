@@ -735,6 +735,20 @@ def _strip_code_fence(text: str) -> str:
     return t.strip()
 
 
+def _normalize_search_term_amount(amount) -> int:
+    """
+    요청 개수를 쓸 수 있는 범위로 좁힌다.
+
+    이 값은 프롬프트 예시를 만들 때 `range()` 에 들어간다. 상한 없이 받으면 모델을
+    부르기도 전에 거대한 목록을 만들어 그 자리에서 메모리를 태운다.
+    """
+    try:
+        value = int(amount)
+    except (TypeError, ValueError):
+        value = 5
+    return max(1, min(value, MAX_SEARCH_TERMS))
+
+
 def _clean_search_terms(terms, amount: int) -> List[str]:
     """
     모델이 돌려준 검색어를 쓸 수 있는 형태로 정리한다.
@@ -746,7 +760,7 @@ def _clean_search_terms(terms, amount: int) -> List[str]:
     형식을 어긴 항목은 잘라서 쓰지 않고 버린다. 문장이나 다른 문자 체계를 잘라 봐야
     검색어가 되지 않고, 원래 뜻과 다른 질의만 남는다.
     """
-    limit = max(1, min(int(amount or 1), MAX_SEARCH_TERMS))
+    limit = _normalize_search_term_amount(amount)
     cleaned: list[str] = []
     for term in terms or []:
         if not isinstance(term, str):
@@ -774,6 +788,7 @@ def generate_terms(
     amount: int = 5,
     match_script_order: bool = False,
 ) -> List[str]:
+    amount = _normalize_search_term_amount(amount)
     if match_script_order:
         goal = (
             f"Generate {amount} chronological stock-video search terms that follow "
