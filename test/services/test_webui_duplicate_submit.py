@@ -30,25 +30,22 @@ class TestDuplicateSubmit(unittest.TestCase):
 
         add_task.assert_not_called()
 
-    def test_a_finished_task_can_be_submitted_again(self):
-        """다시 만들기는 막으면 안 된다. 돌고 있는 것만 거절한다."""
+    def test_the_same_task_can_be_submitted_once_it_stops_running(self):
+        """
+        돌고 있는 것만 거절해야 한다. 한 번 만든 작업을 영영 다시 못 만들면,
+        중복을 막으려다 '다시 만들기' 를 없애는 셈이다.
+        """
+        states = [
+            {"state": const.TASK_STATE_PROCESSING},
+            {"state": const.TASK_STATE_COMPLETE},
+        ]
         with patch.object(webui_task._task_manager, "add_task") as add_task:
-            with patch.object(
-                sm.state,
-                "get_task",
-                return_value={"state": const.TASK_STATE_COMPLETE},
-            ):
-                webui_task.submit_generation("done-task", self.params)
+            with patch.object(sm.state, "get_task", side_effect=states):
+                webui_task.submit_generation("same-task", self.params)
+                add_task.assert_not_called()
 
-        add_task.assert_called_once()
-
-    def test_an_unknown_task_is_submitted(self):
-        """처음 만드는 작업은 상태가 없다."""
-        with patch.object(webui_task._task_manager, "add_task") as add_task:
-            with patch.object(sm.state, "get_task", return_value=None):
-                webui_task.submit_generation("new-task", self.params)
-
-        add_task.assert_called_once()
+                webui_task.submit_generation("same-task", self.params)
+                add_task.assert_called_once()
 
 
 class TestPendingIdIsCleared(unittest.TestCase):
