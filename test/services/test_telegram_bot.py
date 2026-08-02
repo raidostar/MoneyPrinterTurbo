@@ -1,6 +1,7 @@
 """텔레그램 봇."""
 
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 from app.services import telegram_bot as bot
@@ -282,6 +283,35 @@ class TestResponseSize(unittest.TestCase):
         self.assertEqual(
             response.raw.read.call_args.args[0], bot.MAX_RESPONSE_BYTES + 1
         )
+
+    def test_the_video_upload_response_is_bounded_too(self):
+        """
+        업로드 응답도 같은 외부 입력이다. 여기만 통째로 파싱하면 상한을 둔 의미가 없다.
+        """
+        with patch.object(bot.os.path, "getsize", return_value=1024), patch(
+            "builtins.open", unittest.mock.mock_open(read_data=b"x")
+        ), patch.object(bot, "_read_bounded_json", return_value=None) as reader, patch.object(
+            bot, "_send"
+        ), patch.object(bot.requests, "post"):
+            bot._send_video(1, "video.mp4", "caption")
+
+        reader.assert_called_once()
+
+    def test_a_rejection_message_is_trimmed_before_logging(self):
+        """
+        거절 사유는 상대가 쓴 문구다. 길이 제한도 없고 제어문자가 섞일 수도 있어,
+        그대로 남기면 로그를 보는 화면이 조작되거나 로그가 통째로 밀린다.
+        """
+        with patch.object(bot, "_read_bounded_json", return_value={
+            "ok": False, "description": "\x1b[2Jbad " + "x" * 5000
+        }), patch.object(bot.requests, "post"), patch.object(
+            bot.logger, "warning"
+        ) as warning:
+            self.assertIsNone(bot._call("sendMessage", chat_id=1, text="x"))
+
+        message = warning.call_args.args[0]
+        self.assertLess(len(message), 500)
+        self.assertNotIn("\x1b", message)
 
     def test_the_poller_asks_for_a_bounded_batch(self):
         """한 번에 받는 업데이트 수에 상한이 없으면 배치 하나가 그대로 부하가 된다."""

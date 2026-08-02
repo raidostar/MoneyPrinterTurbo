@@ -63,6 +63,32 @@ def _api_url(method: str) -> str:
     return f"{API_BASE}/bot{_bot_token()}/{method}"
 
 
+def _read_bounded_json(response) -> Any:
+    """
+    응답 본문을 상한까지만 읽어 파싱한다. 넘으면 ``None``.
+
+    본문 크기는 상대가 정한다. `response.json()` 은 전부 메모리에 올린 뒤 파싱하므로,
+    거대한 응답 하나로 이 기계가 흔들릴 수 있다.
+    """
+    with response:
+        raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
+    if len(raw) > MAX_RESPONSE_BYTES:
+        logger.warning("telegram returned an oversized body")
+        return None
+    return json.loads(raw)
+
+
+def _for_log(value: Any, limit: int = 200) -> str:
+    """
+    상대가 보낸 문구를 로그에 남길 수 있게 다듬는다.
+
+    길이를 자르고 제어문자를 지운다. 터미널 제어 문자가 섞인 문구를 그대로 흘리면
+    로그를 보는 쪽 화면이 조작될 수 있고, 길이 제한이 없으면 로그가 통째로 밀린다.
+    """
+    text = str(value or "")[:limit]
+    return "".join(char for char in text if char.isprintable())
+
+
 def _call(method: str, **payload) -> dict[str, Any] | None:
     """
     봇 API 를 부르고 결과만 돌려준다. 실패는 기록하고 ``None``.
@@ -78,12 +104,7 @@ def _call(method: str, **payload) -> dict[str, Any] | None:
             timeout=REQUEST_TIMEOUT_SECONDS,
             stream=True,
         )
-        with response:
-            raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
-        if len(raw) > MAX_RESPONSE_BYTES:
-            logger.warning(f"telegram {method} returned an oversized body")
-            return None
-        body = json.loads(raw)
+        body = _read_bounded_json(response)
     except Exception as exc:
         logger.warning(f"telegram {method} failed: {type(exc).__name__}")
         return None
@@ -94,7 +115,7 @@ def _call(method: str, **payload) -> dict[str, Any] | None:
         logger.warning(f"telegram {method} returned a non-object body")
         return None
     if not body.get("ok"):
-        logger.warning(f"telegram {method} rejected: {body.get('description')}")
+        logger.warning(f"telegram {method} rejected: {_for_log(body.get('description'))}")
         return None
     return body.get("result")
 
@@ -123,8 +144,10 @@ def _send_video(chat_id: int, video_path: str, caption: str) -> None:
                 data={"chat_id": chat_id, "caption": caption},
                 files={"video": video_file},
                 timeout=REQUEST_TIMEOUT_SECONDS * 4,
+                stream=True,
             )
-        if not response.json().get("ok"):
+        body = _read_bounded_json(response)
+        if not isinstance(body, dict) or not body.get("ok"):
             raise RuntimeError("telegram rejected the upload")
     except Exception as exc:
         logger.warning(f"telegram sendVideo failed: {type(exc).__name__}")
