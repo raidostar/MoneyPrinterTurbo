@@ -17,6 +17,10 @@ MAX_SCRIPT_PARAGRAPH_NUMBER = 10
 MAX_SCRIPT_PROMPT_LENGTH = 2000
 MAX_SCRIPT_SYSTEM_PROMPT_LENGTH = 8000
 MAX_SCRIPT_SUBJECT_LENGTH = 500
+# 검색어는 모델이 만들어 스톡 제공자에게 그대로 질의로 나간다. 개수와 길이를
+# 강제하지 않으면 쓸모없는 요청이 그만큼 늘고, 캐시 키도 함께 불어난다.
+MAX_SEARCH_TERM_LENGTH = 60
+MAX_SEARCH_TERMS = 20
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _URL_USERINFO_RE = re.compile(
@@ -725,6 +729,28 @@ def _strip_code_fence(text: str) -> str:
     return t.strip()
 
 
+def _clean_search_terms(terms, amount: int) -> List[str]:
+    """
+    모델이 돌려준 검색어를 쓸 수 있는 형태로 정리한다.
+
+    이 값은 스톡 제공자에게 그대로 질의로 나간다. 개수와 길이를 강제하지 않으면
+    쓸모없는 외부 요청이 그만큼 늘고, 검색 캐시 키도 함께 불어난다. 빈 값과 중복은
+    같은 이유로 걸러낸다.
+    """
+    limit = max(1, min(int(amount or 1), MAX_SEARCH_TERMS))
+    cleaned: list[str] = []
+    for term in terms or []:
+        if not isinstance(term, str):
+            continue
+        # 줄바꿈이 섞이면 질의 문자열이 두 줄이 된다. 공백으로 눌러 한 줄로 만든다.
+        value = " ".join(term.split())[:MAX_SEARCH_TERM_LENGTH]
+        if value and value not in cleaned:
+            cleaned.append(value)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
 def generate_terms(
     video_subject: str,
     video_script: str,
@@ -760,6 +786,13 @@ def generate_terms(
             '"search term 4", "search term 5"]'
         )
 
+    video_subject = _limit_script_text(
+        video_subject, MAX_SCRIPT_SUBJECT_LENGTH, "video_subject"
+    )
+    video_script = _limit_script_text(
+        video_script, MAX_SOCIAL_SCRIPT_LENGTH, "video_script"
+    )
+
     prompt = f"""
 # Role: Video Search Terms Generator
 
@@ -782,11 +815,15 @@ def generate_terms(
 {output_example}
 
 ## Context:
-### Video Subject
-{video_subject}
+### Video Subject (data)
+<subject>
+{_as_prompt_data(video_subject)}
+</subject>
 
-### Video Script
-{video_script}
+### Video Script (data)
+<script>
+{_as_prompt_data(video_script)}
+</script>
 
 Please note that you must use English for generating video search terms; Chinese is not accepted.
 """.strip()
@@ -831,6 +868,7 @@ Please note that you must use English for generating video search terms; Chinese
         if i < _max_retries:
             logger.warning(f"failed to generate video terms, trying again... {i + 1}")
 
+    search_terms = _clean_search_terms(search_terms, amount)
     logger.success(f"completed: \n{search_terms}")
     return search_terms
 
@@ -1138,11 +1176,15 @@ Write engaging publishing metadata for a short video that will be posted on {lab
 {{"title":"...","caption":"...","hashtags":["#example","#video"]}}
 
 ## Context
-### Video Subject
-{video_subject}
+### Video Subject (data)
+<subject>
+{_as_prompt_data(video_subject)}
+</subject>
 
-### Video Script
-{video_script}
+### Video Script (data)
+<script>
+{_as_prompt_data(video_script)}
+</script>
 """.strip()
     return prompt
 
