@@ -94,9 +94,20 @@ class TestRestoreFromUrl(unittest.TestCase):
         작업 이름이 주소에서 온다. 상대 경로, 절대 경로, NUL 이 섞인 값 어느 것도
         작업 디렉터리 밖을 가리켜서는 안 된다.
         """
-        for hostile in ("../../etc", "/etc", "sub/../../../etc", "task\x00.json"):
+        hostile_ids = (
+            "../../etc",
+            "/etc",
+            "sub/../../../etc",
+            "task\x00.json",
+            # 결과가 작업 폴더 안에 떨어져도, 경로처럼 생긴 값은 받지 않는다.
+            f"unused/../{TASK_ID}",
+            str(Path(self.tmp_path) / TASK_ID),
+        )
+        for hostile in hostile_ids:
             with self.subTest(task=hostile):
                 app = _app_with_task(self.tmp_path, {"task": hostile})
+                # 주소를 읽고 거절했다는 표시. 아예 안 읽어도 아래는 통과한다.
+                self.assertEqual(app.session_state["url_task_restore_applied"], hostile)
                 self.assertEqual(app.session_state["video_subject"], "")
                 self.assertFalse(app.exception)
                 self.assertNotIn("task_restore_payload", app.session_state)
@@ -116,6 +127,7 @@ class TestRestoreFromUrl(unittest.TestCase):
 
         app = _app_with_task(self.tmp_path, {"task": "escape"})
 
+        self.assertEqual(app.session_state["url_task_restore_applied"], "escape")
         self.assertEqual(app.session_state["video_subject"], "")
         self.assertNotIn("task_restore_payload", app.session_state)
 

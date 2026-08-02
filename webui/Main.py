@@ -840,12 +840,18 @@ def _render_task_manager_entry():
 
 
 def _load_task_restore_payload(task_id):
-    # 작업 이름은 화면의 목록에서도 오고 주소의 `?task=` 에서도 온다. 경로 판정은
-    # 프로젝트의 공용 검사기에 맡긴다. 절대 경로, NUL, 심볼릭 링크로 빠져나가는
-    # 경우까지 한곳에서 같은 규칙으로 걸러내기 위해서다.
+    # 작업 이름은 디렉터리 이름 하나다. 경로처럼 생긴 값은 결과가 작업 폴더 안에
+    # 떨어지더라도 받지 않는다. `a/../b` 나 절대 경로가 통하면, 뒤에서 이 값을
+    # 다루는 코드마다 같은 판정을 되풀이해야 한다.
+    name = str(task_id)
+    if not name or name in {".", ".."} or name != os.path.basename(name):
+        logger.warning("task id is not a single directory name")
+        return None
+
+    # 담기 판정과 심볼릭 링크는 프로젝트의 공용 검사기에 맡긴다.
     try:
         task_path = file_security.resolve_path_within_directory(
-            utils.task_dir(), str(task_id), require_file=False
+            utils.task_dir(), name, require_file=False
         )
     except (ValueError, OSError) as e:
         logger.warning(f"invalid task restore path: {e}")
