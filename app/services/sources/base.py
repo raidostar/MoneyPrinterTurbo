@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 MAX_TITLE_LENGTH = 300
 MAX_TEXT_LENGTH = 4000
 MAX_URL_LENGTH = 2000
+MAX_ID_LENGTH = 64
+MAX_TAGS = 10
+MAX_TAG_LENGTH = 40
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,18 @@ class SourceItem:
             self, "discussion_url", _clip(self.discussion_url, MAX_URL_LENGTH)
         )
         object.__setattr__(self, "author", _clip(self.author, 100))
+        object.__setattr__(self, "item_id", _clip(self.item_id, MAX_ID_LENGTH))
+        object.__setattr__(self, "created_at", _clip(self.created_at, 40))
+        # 태그는 소스가 몇 개든 붙여 보낼 수 있다. 개수와 길이를 여기서 묶는다.
+        object.__setattr__(
+            self,
+            "tags",
+            tuple(
+                _clip(tag, MAX_TAG_LENGTH)
+                for tag in tuple(self.tags)[:MAX_TAGS]
+                if _clip(tag, MAX_TAG_LENGTH)
+            ),
+        )
 
 
 def _clip(value, limit: int) -> str:

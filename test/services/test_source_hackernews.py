@@ -116,6 +116,27 @@ class TestBounds(unittest.TestCase):
             get.call_args.kwargs["params"]["hitsPerPage"], hackernews.MAX_HITS
         )
 
+    def test_an_id_that_is_not_a_number_is_dropped(self):
+        """
+        이 값이 토론 주소에 그대로 들어간다. HN 의 글 번호는 숫자이므로, 그렇지
+        않은 값으로 주소를 만들면 엉뚱한 곳을 가리키는 링크가 카드에 실린다.
+        """
+        for hostile in ("1&x=2", "../../admin", "1 OR 1", "x" * 200):
+            with self.subTest(item_id=hostile):
+                self.assertEqual(_fetch({"hits": [_hit(objectID=hostile)]}), [])
+
+    def test_tags_are_capped_in_count_and_length(self):
+        """태그는 소스가 몇 개든 붙여 보낼 수 있다."""
+        items = _fetch({"hits": [_hit(_tags=["t" * 500] * 100)]})
+        item = items[0]
+        self.assertLessEqual(len(item.tags), 10)
+        self.assertTrue(all(len(tag) <= 40 for tag in item.tags))
+
+    def test_a_long_timestamp_is_clipped(self):
+        """소스가 준 시각 문자열도 기록과 프롬프트로 흘러간다."""
+        items = _fetch({"hits": [_hit(created_at="9" * 5000)]})
+        self.assertLessEqual(len(items[0].created_at), 40)
+
     def test_a_long_title_is_clipped(self):
         """제목은 그대로 프롬프트와 카드로 흘러간다."""
         items = _fetch({"hits": [_hit(title="x" * 10_000)]})

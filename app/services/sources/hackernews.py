@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import requests
 from loguru import logger
 
-from app.services.sources.base import SourceItem
+from app.services.sources.base import MAX_ID_LENGTH, SourceItem
 
 SEARCH_URL = "https://hn.algolia.com/api/v1/search_by_date"
 ITEM_URL = "https://news.ycombinator.com/item?id={item_id}"
@@ -57,8 +57,13 @@ def _to_item(hit) -> SourceItem | None:
 
     item_id = str(hit.get("objectID", "") or "").strip()
     title = str(hit.get("title") or hit.get("story_title") or "").strip()
-    if not item_id or not title:
+    if not title:
         # 제목 없는 글은 카드로 만들 수 없다. 댓글이 검색에 섞여 들어올 때 걸린다.
+        return None
+    # 이 값이 토론 주소에 그대로 들어간다. HN 의 글 번호는 숫자이므로, 숫자가
+    # 아니면 주소를 만들지 않고 글 자체를 버린다.
+    if not item_id.isdigit() or len(item_id) > MAX_ID_LENGTH:
+        logger.warning("dropped a hacker news hit with an unusable id")
         return None
 
     url = str(hit.get("url") or "").strip()
