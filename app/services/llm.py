@@ -768,9 +768,13 @@ def generate_terms(
 
 ## Constrains:
 1. the search terms are to be returned as a json-array of strings.
-2. each search term should consist of 1-3 words, always add the main subject of the video.
+2. each search term names something a camera can point at — an object, a place,
+   or a physical action. 1-3 words.
 3. you must only return the json-array of strings. you must not return anything else. you must not return the script.
-4. the search terms must be related to the subject of the video.
+4. search a stock library, not the story. the premise, the relationships, and
+   how anyone feels are not filmable and return nothing usable. "blind date
+   cafe" finds no footage of a blind date; "cafe closed sign" and "man walking
+   hot street" find the shots that scene is made of.
 5. reply with english search terms only.
 {ordering_rule}
 

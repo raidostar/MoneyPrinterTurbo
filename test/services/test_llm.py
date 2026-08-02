@@ -1549,3 +1549,32 @@ class TestLiteLLMLiveIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSearchTermsAreFilmable(unittest.TestCase):
+    """검색어는 스톡 라이브러리에 실제로 있는 것을 가리켜야 한다."""
+
+    def _prompt(self):
+        captured = {}
+
+        def fake(prompt, **_):
+            captured["prompt"] = prompt
+            return '["a", "b", "c", "d", "e"]'
+
+        with patch.object(llm, "_generate_response", side_effect=fake):
+            llm.generate_terms("소개팅 이야기", "본문", amount=5)
+        return captured["prompt"]
+
+    def test_the_prompt_no_longer_asks_to_append_the_subject(self):
+        """
+        모든 검색어에 주제를 붙이라고 하면 `blind date cafe` 처럼 스톡에 없는 말이
+        나온다. 그 결과 관계없는 영상이 붙는다.
+        """
+        self.assertNotIn("always add the main subject", self._prompt())
+
+    def test_the_prompt_asks_for_something_a_camera_can_point_at(self):
+        """이야기의 전제나 감정은 찍을 수 없다. 장면을 이루는 사물과 동작을 찾아야 한다."""
+        prompt = self._prompt()
+        self.assertIn("a camera can point at", prompt)
+        self.assertIn("not the story", prompt)
+
