@@ -593,19 +593,27 @@ def build_script_prompt(
     # 들어가야 하는 파라미터를 빠뜨리지 않는다.
     # 직접 써 넣은 프롬프트가 항상 이긴다. 스타일은 기본값을 고르는 수단일 뿐이다.
     prompt = custom_system_prompt or script_style_prompt(script_style)
+    # 주제, 언어, 추가 요구사항은 사용자가 쓴 글이라 규칙처럼 읽힐 수 있다. 헤드라인
+    # 쪽과 같은 방식으로 경계를 표시하고 꺾쇠를 이스케이프해, 재료 쪽에서 구분자를
+    # 만들 수 없게 한다.
     prompt += f"""
 
 # Initialization:
-- video subject: {video_subject}
+- video subject (data): <subject>{_as_prompt_data(video_subject)}</subject>
 - number of paragraphs: {paragraph_number}
 """.rstrip()
     if language:
-        prompt += f"\n- language: {language}"
+        prompt += (
+            "\n- language (data): <language>"
+            f"{_as_prompt_data(_normalize_social_language(language))}</language>"
+        )
     if video_script_prompt:
         prompt += f"""
 
-# Additional User Requirements:
-{video_script_prompt}
+# Additional User Requirements (data)
+<requirements>
+{_as_prompt_data(video_script_prompt)}
+</requirements>
 """.rstrip()
 
     return prompt

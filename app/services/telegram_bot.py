@@ -31,8 +31,10 @@ REQUEST_TIMEOUT_SECONDS = POLL_TIMEOUT_SECONDS + 15
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SUBJECT_LENGTH = 200
 # 대본은 프롬프트(키워드 생성)와 TTS 로 흘러간다. 봇에서 들어오는 값도 다른 입구와
-# 같은 상한을 받아야 한다.
-MAX_SCRIPT_LENGTH = 5000
+# 같은 상한을 받아야 한다. 그 위에 텔레그램 메시지 한도(4096자)가 더 좁은 제약이다.
+# 대본 전문과 글자 수를 한 메시지에 실어 버튼을 붙이므로, 넘으면 승인할 방법이 없어진다.
+MAX_TELEGRAM_MESSAGE_LENGTH = 4096
+MAX_SCRIPT_LENGTH = 3500
 
 
 class TelegramConfigError(RuntimeError):
@@ -299,6 +301,12 @@ class ShortsBot:
         source = update.get("message") or update.get("callback_query") or {}
         chat = source.get("chat") or (source.get("message") or {}).get("chat") or {}
         incoming_chat_id = chat.get("id")
+
+        # 그룹 대화 id 를 넣어 두면 그 방의 누구나 이 기계에서 렌더링을 돌릴 수 있다.
+        # 한 사람이 쓰는 봇이므로 1:1 대화만 받는다.
+        if chat.get("type") not in (None, "private"):
+            logger.warning("ignored a telegram update from a non-private chat")
+            return
 
         if not self.chat_id:
             # 최초 설정. chat_id 를 알아야 설정에 적을 수 있는데, 그 값은 실제로
