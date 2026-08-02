@@ -13,6 +13,7 @@ import os
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 import requests
 from loguru import logger
@@ -29,6 +30,9 @@ REQUEST_TIMEOUT_SECONDS = POLL_TIMEOUT_SECONDS + 15
 # 봇 파일 전송 한도. 넘으면 텔레그램이 거절하므로 미리 알려준다.
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SUBJECT_LENGTH = 200
+# 대본은 프롬프트(키워드 생성)와 TTS 로 흘러간다. 봇에서 들어오는 값도 다른 입구와
+# 같은 상한을 받아야 한다.
+MAX_SCRIPT_LENGTH = 5000
 
 
 class TelegramConfigError(RuntimeError):
@@ -69,6 +73,11 @@ def _call(method: str, **payload) -> dict[str, Any] | None:
         logger.warning(f"telegram {method} failed: {type(exc).__name__}")
         return None
 
+    # 응답은 외부 입력이다. 모양을 확인하지 않고 dict 로 다루면, 예상 밖의 본문
+    # 하나가 폴링 루프를 끝내 버려 밖에 있는 동안 봇이 죽는다.
+    if not isinstance(body, dict):
+        logger.warning(f"telegram {method} returned a non-object body")
+        return None
     if not body.get("ok"):
         logger.warning(f"telegram {method} rejected: {body.get('description')}")
         return None
@@ -171,15 +180,26 @@ class ShortsBot:
             _send(self.chat_id, "대본 생성에 실패했어요. 잠시 후 다시 해보세요.")
             return
 
-        self.pending = {"subject": subject, "script": script}
+        self._offer_draft(subject, script)
+
+    def _offer_draft(self, subject: str, script: str) -> None:
+        """대본을 승인 대기에 올리고 버튼을 붙여 보낸다."""
+        script = str(script or "").strip()[:MAX_SCRIPT_LENGTH]
+        if not script:
+            return
+
+        # 어느 대본에 대한 버튼인지 표시해 둔다. 다시 뽑은 뒤 예전 메시지의 승인을
+        # 누르면, 보고 있는 것과 다른 대본이 만들어진다.
+        draft_id = uuid4().hex[:8]
+        self.pending = {"subject": subject, "script": script, "draft_id": draft_id}
         _send(
             self.chat_id,
             f"{script}\n\n— {len(script)}자",
             buttons=[
                 [
-                    {"text": "승인", "callback_data": "approve"},
-                    {"text": "다시 뽑기", "callback_data": "retry"},
-                    {"text": "취소", "callback_data": "cancel"},
+                    {"text": "승인", "callback_data": f"approve:{draft_id}"},
+                    {"text": "다시 뽑기", "callback_data": f"retry:{draft_id}"},
+                    {"text": "취소", "callback_data": f"cancel:{draft_id}"},
                 ]
             ],
         )
@@ -244,26 +264,22 @@ class ShortsBot:
 
         # 명령이 아닌 글은 대본을 직접 고쳐 보낸 것으로 본다.
         if self.pending:
-            self.pending["script"] = text
-            _send(
-                self.chat_id,
-                "고친 대본으로 바꿨어요.",
-                buttons=[
-                    [
-                        {"text": "승인", "callback_data": "approve"},
-                        {"text": "취소", "callback_data": "cancel"},
-                    ]
-                ],
-            )
+            self._offer_draft(self.pending.get("subject", ""), text)
 
     def _handle_callback(self, callback: dict) -> None:
         _answer_callback(str(callback.get("id", "")))
-        action = str(callback.get("data", "") or "")
+        action, _, draft_id = str(callback.get("data", "") or "").partition(":")
+
+        if not self.pending.get("script"):
+            _send(self.chat_id, "승인할 대본이 없어요. /새영상 부터 시작해 주세요.")
+            return
+        if draft_id != self.pending.get("draft_id"):
+            # 다시 뽑은 뒤 예전 메시지의 버튼을 누른 경우. 보고 있는 것과 다른
+            # 대본을 만들어 주는 편이 더 나쁘다.
+            _send(self.chat_id, "지난 대본의 버튼이에요. 마지막으로 보낸 대본에서 눌러주세요.")
+            return
 
         if action == "approve":
-            if not self.pending.get("script"):
-                _send(self.chat_id, "승인할 대본이 없어요. /새영상 부터 시작해 주세요.")
-                return
             self._start_render()
         elif action == "retry":
             subject = self.pending.get("subject", "")
@@ -306,10 +322,18 @@ class ShortsBot:
         updates = _call(
             "getUpdates", offset=self.offset, timeout=POLL_TIMEOUT_SECONDS
         )
-        if not updates:
+        if not isinstance(updates, list):
             return
         for update in updates:
-            self.offset = int(update.get("update_id", 0)) + 1
+            if not isinstance(update, dict):
+                continue
+            try:
+                self.offset = int(update.get("update_id", 0)) + 1
+            except (TypeError, ValueError):
+                # 이 업데이트의 번호를 읽지 못하면 offset 을 옮길 수 없다. 건너뛰면
+                # 같은 것을 계속 다시 받으므로, 하나 올려 앞으로 나아간다.
+                self.offset += 1
+                continue
             try:
                 self.handle_update(update)
             except Exception:

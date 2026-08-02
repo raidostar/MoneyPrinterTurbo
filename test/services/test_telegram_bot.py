@@ -44,12 +44,12 @@ class TestAccessControl(unittest.TestCase):
         """버튼 눌림도 같은 경로로 들어온다. 메시지만 막으면 반쪽이다."""
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
-        shorts.pending = {"subject": "s", "script": "본문"}
+        shorts.pending = {"subject": "s", "script": "본문", "draft_id": "abc12345"}
 
         with patch.object(bot, "_send"), patch.object(
             shorts, "_start_render"
         ) as render, patch.object(bot, "_answer_callback"):
-            shorts.handle_update(_callback(999, "approve"))
+            shorts.handle_update(_callback(999, "approve:abc12345"))
 
         render.assert_not_called()
 
@@ -105,10 +105,10 @@ class TestApprovalFlow(unittest.TestCase):
         """취소했는데 다음 승인에서 예전 대본이 살아나면 안 된다."""
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
-        shorts.pending = {"subject": "s", "script": "본문"}
+        shorts.pending = {"subject": "s", "script": "본문", "draft_id": "abc12345"}
 
         with patch.object(bot, "_send"), patch.object(bot, "_answer_callback"):
-            shorts.handle_update(_callback(111, "cancel"))
+            shorts.handle_update(_callback(111, "cancel:abc12345"))
 
         self.assertEqual(shorts.pending, {})
 
@@ -121,7 +121,7 @@ class TestApprovalFlow(unittest.TestCase):
         with patch.object(bot, "_send"), patch.object(
             shorts, "_start_render"
         ) as render, patch.object(bot, "_answer_callback"):
-            shorts.handle_update(_callback(111, "approve"))
+            shorts.handle_update(_callback(111, "approve:abc12345"))
 
         render.assert_not_called()
 
@@ -129,7 +129,7 @@ class TestApprovalFlow(unittest.TestCase):
         """대본을 직접 고쳐 보내는 것이 봇에서 할 수 있는 유일한 편집이다."""
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
-        shorts.pending = {"subject": "s", "script": "원래 대본"}
+        shorts.pending = {"subject": "s", "script": "원래 대본", "draft_id": "abc12345"}
 
         with patch.object(bot, "_send"):
             shorts.handle_update(_message(111, "내가 고친 대본"))
@@ -150,6 +150,81 @@ class TestApprovalFlow(unittest.TestCase):
             shorts.handle_update(_message(111, "/새영상 닭가슴살"))
 
         self.assertEqual(shorts.pending, {})
+
+
+class TestStaleButtonsAndBounds(unittest.TestCase):
+    def test_a_button_from_a_replaced_draft_is_refused(self):
+        """
+        다시 뽑은 뒤 예전 메시지의 승인을 누르면, 보고 있는 것과 다른 대본이
+        만들어진다. 승인한 것과 만들어지는 것이 달라서는 안 된다.
+        """
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        shorts.pending = {"subject": "s", "script": "새 대본", "draft_id": "new00000"}
+
+        with patch.object(bot, "_send"), patch.object(
+            shorts, "_start_render"
+        ) as render, patch.object(bot, "_answer_callback"):
+            shorts.handle_update(_callback(111, "approve:old00000"))
+
+        render.assert_not_called()
+
+    def test_each_draft_gets_its_own_button_id(self):
+        """번호가 같으면 지난 대본의 버튼을 구분할 수 없다."""
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+
+        with patch.object(bot, "_send"):
+            shorts._offer_draft("s", "첫 대본")
+            first = shorts.pending["draft_id"]
+            shorts._offer_draft("s", "둘째 대본")
+
+        self.assertNotEqual(first, shorts.pending["draft_id"])
+
+    def test_an_overlong_script_is_cut_before_it_reaches_the_pipeline(self):
+        """
+        대본은 키워드 생성 프롬프트와 TTS 로 흘러간다. 봇으로 들어오는 값도 다른
+        입구와 같은 상한을 받아야 한다.
+        """
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        shorts.pending = {"subject": "s", "script": "짧은 대본", "draft_id": "abc12345"}
+
+        with patch.object(bot, "_send"):
+            shorts.handle_update(_message(111, "가" * 50_000))
+
+        self.assertLessEqual(len(shorts.pending["script"]), bot.MAX_SCRIPT_LENGTH)
+
+
+class TestMalformedResponses(unittest.TestCase):
+    """봇 API 응답은 외부 입력이다."""
+
+    def test_a_non_object_body_does_not_raise(self):
+        """예상 밖의 본문 하나가 폴링 루프를 끝내면 밖에 있는 동안 봇이 죽는다."""
+        with patch.object(bot.requests, "post") as post:
+            post.return_value.json.return_value = ["unexpected"]
+            self.assertIsNone(bot._call("sendMessage", chat_id=1, text="x"))
+
+    def test_a_non_iterable_result_does_not_kill_the_poller(self):
+        """
+        `result` 가 순회할 수 없는 값이면 for 문에서 예외가 나고, 그 예외는
+        폴링 루프 밖으로 나가 봇을 끝낸다.
+        """
+        shorts = bot.ShortsBot()
+        with patch.object(bot, "_call", return_value=42):
+            shorts.poll_once()
+        self.assertEqual(shorts.offset, 0)
+
+    def test_an_update_without_a_usable_id_still_advances_the_offset(self):
+        """
+        번호를 읽지 못한 업데이트를 그냥 건너뛰면 같은 것을 계속 다시 받아,
+        봇이 그 자리에 갇힌다.
+        """
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with patch.object(bot, "_call", return_value=[{"update_id": "nope"}]):
+            shorts.poll_once()
+        self.assertEqual(shorts.offset, 1)
 
 
 class TestSecrets(unittest.TestCase):
