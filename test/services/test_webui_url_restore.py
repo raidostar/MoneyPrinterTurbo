@@ -89,6 +89,36 @@ class TestRestoreFromUrl(unittest.TestCase):
         self.assertEqual(app.session_state["video_subject"], "")
         self.assertFalse(app.exception)
 
+    def test_paths_that_escape_the_task_directory_are_refused(self):
+        """
+        작업 이름이 주소에서 온다. 상대 경로, 절대 경로, NUL 이 섞인 값 어느 것도
+        작업 디렉터리 밖을 가리켜서는 안 된다.
+        """
+        for hostile in ("../../etc", "/etc", "sub/../../../etc", "task\x00.json"):
+            with self.subTest(task=hostile):
+                app = _app_with_task(self.tmp_path, {"task": hostile})
+                self.assertEqual(app.session_state["video_subject"], "")
+                self.assertFalse(app.exception)
+                self.assertNotIn("task_restore_payload", app.session_state)
+
+    def test_a_symlink_out_of_the_task_directory_is_refused(self):
+        """작업 디렉터리 안의 심볼릭 링크로 밖을 가리키는 것도 막아야 한다."""
+        import os
+
+        outside = Path(self.tmp_path).parent / "outside-task"
+        outside.mkdir(exist_ok=True)
+        (outside / "script.json").write_text(
+            json.dumps(SCRIPT_DATA, ensure_ascii=False), encoding="utf-8"
+        )
+        link = Path(self.tmp_path) / "escape"
+        if not link.exists():
+            os.symlink(outside, link)
+
+        app = _app_with_task(self.tmp_path, {"task": "escape"})
+
+        self.assertEqual(app.session_state["video_subject"], "")
+        self.assertNotIn("task_restore_payload", app.session_state)
+
     def test_a_traversal_path_is_refused(self):
         """
         작업 이름은 주소에서 온다. 작업 디렉터리 밖을 가리키는 값이 그대로 로더에

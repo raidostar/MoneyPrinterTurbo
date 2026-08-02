@@ -49,7 +49,7 @@ from app.services import state as sm
 from app.services import task as tm
 from app.services import version_checker
 from app.utils.logging_utils import configure_terminal_logger
-from app.utils import utils
+from app.utils import file_security, utils
 
 st.set_page_config(
     page_title="MoneyPrinterTurbo",
@@ -840,13 +840,15 @@ def _render_task_manager_entry():
 
 
 def _load_task_restore_payload(task_id):
-    tasks_root = os.path.realpath(utils.task_dir())
-    task_path = os.path.realpath(os.path.join(tasks_root, str(task_id)))
+    # 작업 이름은 화면의 목록에서도 오고 주소의 `?task=` 에서도 온다. 경로 판정은
+    # 프로젝트의 공용 검사기에 맡긴다. 절대 경로, NUL, 심볼릭 링크로 빠져나가는
+    # 경우까지 한곳에서 같은 규칙으로 걸러내기 위해서다.
     try:
-        if os.path.commonpath([tasks_root, task_path]) != tasks_root:
-            raise ValueError("task path is outside the task directory")
-    except ValueError as e:
-        logger.warning(f"invalid task restore path: {task_id}, {e}")
+        task_path = file_security.resolve_path_within_directory(
+            utils.task_dir(), str(task_id), require_file=False
+        )
+    except (ValueError, OSError) as e:
+        logger.warning(f"invalid task restore path: {e}")
         return None
 
     script_data = _safe_load_task_script(task_path)
