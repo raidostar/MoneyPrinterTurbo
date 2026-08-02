@@ -1010,6 +1010,11 @@ def _wrap_headline(text: str) -> str:
     return "\n".join(line[:MAX_HEADLINE_LINE_LENGTH] for line in lines[:HEADLINE_LINES])
 
 
+# 렌더링 쪽도 같은 규칙으로 접어야 한다. 직접 써 넣은 헤드라인이 잘리기만 하면
+# 뒷부분이 사라지고, 그건 예전에 없던 손실이다.
+wrap_headline = _wrap_headline
+
+
 def _fallback_headline(video_subject: str, video_script: str) -> str:
     """LLM 을 쓸 수 없을 때 주제나 대본 앞부분을 두 줄로 잘라 쓴다."""
     source = str(video_subject or "").strip() or str(video_script or "").strip()

@@ -36,6 +36,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import llm
 from app.services.utils import video_effects
 from app.utils import file_security, utils
 
@@ -1115,11 +1116,19 @@ MIN_CARD_VIDEO_HEIGHT_RATIO = 0.3
 
 
 def _clamp_headline(text: str) -> str:
-    """직접 써 넣은 헤드라인도 두 줄, 줄당 길이 제한 안에 들어오게 자른다."""
+    """
+    직접 써 넣은 헤드라인을 두 줄 안에 들어오게 만든다.
+
+    길이를 지킨 줄은 쓴 사람이 고른 줄바꿈을 그대로 둔다. 어겼을 때만 다시 접는다.
+    잘라 버리면 뒷부분이 사라지는데, 그건 문구를 짧게 만드는 게 아니라 없애는 것이다.
+    """
     lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
-    return "\n".join(
-        line[:MAX_HEADLINE_LINE_LENGTH] for line in lines[:HEADLINE_LINES]
-    )
+    lines = lines[:HEADLINE_LINES]
+    if not lines:
+        return ""
+    if all(len(line) <= MAX_HEADLINE_LINE_LENGTH for line in lines):
+        return "\n".join(lines)
+    return llm.wrap_headline(" ".join(lines))
 
 
 def _headline_clip(params, font_path: str, canvas_width: int, duration: float):

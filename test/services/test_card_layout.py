@@ -296,8 +296,23 @@ class TestAnOversizedHeadlineCannotEatTheVideo(unittest.TestCase):
         """
         self.assertEqual(video._clamp_headline("하나\n둘\n셋\n넷"), "하나\n둘")
 
-    def test_a_long_line_is_cut(self):
-        """한 줄이 길면 caption 이 아래로 접혀 결국 같은 문제가 된다."""
+    def test_a_long_line_moves_onto_the_second_line(self):
+        """
+        잘라 버리면 뒷부분이 사라진다. 그건 문구를 짧게 만드는 게 아니라 없애는
+        것이고, 예전에는 렌더러가 알아서 접어 주던 것이다.
+        """
+        clamped = video._clamp_headline("The hidden cost of drinking coffee")
+        lines = clamped.split("\n")
+
+        self.assertEqual(len(lines), 2)
+        self.assertIn("drinking", clamped)
+
+    def test_a_line_within_the_limit_keeps_the_break_that_was_typed(self):
+        """멀쩡한 줄까지 다시 접으면 쓴 사람이 고른 의미 단위가 깨진다."""
+        self.assertEqual(video._clamp_headline("첫 줄\n둘째 줄"), "첫 줄\n둘째 줄")
+
+    def test_a_run_with_nowhere_to_wrap_is_cut(self):
+        """공백이 없으면 접을 자리가 없다. 그래도 폭은 지켜야 한다."""
         clamped = video._clamp_headline("가" * 500)
         self.assertEqual(len(clamped), video.MAX_HEADLINE_LINE_LENGTH)
 
