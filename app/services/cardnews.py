@@ -8,8 +8,10 @@
 빼앗는다.
 """
 
+import math
 import os
 from dataclasses import dataclass, field
+from itertools import islice
 
 import numpy as np
 from loguru import logger
@@ -39,6 +41,9 @@ MAX_BODY_LINES = 5
 MAX_BODY_LINE_LENGTH = 120
 MAX_FOOTER_LENGTH = 80
 MIN_CARD_SECONDS = 0.5
+# 카드 한 장이 이보다 오래 머물면 영상이 아니라 정지 화면이다. 잘못된 값 하나로
+# 끝나지 않는 렌더링이 시작되는 것도 막는다.
+MAX_CARD_SECONDS = 60.0
 
 
 @dataclass
@@ -54,10 +59,12 @@ class Card:
         self.title = _clip(self.title, MAX_TITLE_LENGTH)
         self.footer = _clip(self.footer, MAX_FOOTER_LENGTH)
         self.index_label = _clip(self.index_label, 8)
+        # islice 로 앞에서 끊는다. 먼저 tuple 로 만들면 끝없는 이터러블 하나에
+        # 상한이 걸리기도 전에 메모리를 태운다.
         self.body = tuple(
-            _clip(line, MAX_BODY_LINE_LENGTH)
-            for line in tuple(self.body)[:MAX_BODY_LINES]
-            if _clip(line, MAX_BODY_LINE_LENGTH)
+            cleaned
+            for line in islice(self.body, MAX_BODY_LINES)
+            if (cleaned := _clip(line, MAX_BODY_LINE_LENGTH))
         )
 
 
@@ -183,6 +190,22 @@ def render_card(card: Card, size: tuple[int, int] = CANVAS_SIZE) -> Image.Image:
     return canvas
 
 
+def _card_seconds(value) -> float:
+    """
+    카드가 머무는 시간을 쓸 수 있는 범위로 만든다.
+
+    이 값은 나레이션 길이 계산에서 나오므로 0 이나 NaN 이 섞일 수 있고, 그대로
+    넘기면 읽을 수 없는 카드나 끝나지 않는 렌더링이 된다.
+    """
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        seconds = MIN_CARD_SECONDS
+    if not math.isfinite(seconds):
+        seconds = MIN_CARD_SECONDS
+    return max(MIN_CARD_SECONDS, min(seconds, MAX_CARD_SECONDS))
+
+
 def build_card_news_clip(
     cards, durations, size: tuple[int, int] = CANVAS_SIZE
 ):
@@ -195,11 +218,11 @@ def build_card_news_clip(
     """
     from moviepy import ImageClip, concatenate_videoclips
 
-    cards = list(cards)[:MAX_CARDS]
+    cards = list(islice(cards, MAX_CARDS))
     if not cards:
         raise ValueError("card news needs at least one card")
 
-    durations = [max(MIN_CARD_SECONDS, float(value)) for value in durations]
+    durations = [_card_seconds(value) for value in islice(durations, MAX_CARDS)]
     if not durations:
         raise ValueError("card news needs at least one duration")
 

@@ -133,6 +133,50 @@ class TestClip(unittest.TestCase):
         finally:
             clip.close()
 
+    def test_a_broken_duration_falls_back_instead_of_raising(self):
+        """
+        이 값은 나레이션 길이 계산에서 나온다. 0 이나 NaN 이 섞일 수 있고,
+        그대로 넘기면 읽을 수 없는 카드나 끝나지 않는 렌더링이 된다.
+        """
+        for broken in (float("inf"), float("nan"), None, "삼초", -5):
+            with self.subTest(duration=broken):
+                clip = cardnews.build_card_news_clip([Card(title="하나")], [broken])
+                try:
+                    self.assertTrue(0 < clip.duration <= cardnews.MAX_CARD_SECONDS)
+                finally:
+                    clip.close()
+
+    def test_an_absurd_duration_is_capped(self):
+        """카드 한 장이 한 시간이면 영상이 아니라 정지 화면이다."""
+        clip = cardnews.build_card_news_clip([Card(title="하나")], [100_000])
+        try:
+            self.assertEqual(clip.duration, cardnews.MAX_CARD_SECONDS)
+        finally:
+            clip.close()
+
+    def test_an_endless_stream_of_cards_is_cut_off_before_it_is_built(self):
+        """
+        먼저 목록으로 만들면 상한이 걸리기도 전에 메모리를 태운다.
+        """
+        from itertools import count
+
+        def forever():
+            for index in count():
+                yield Card(title=f"카드 {index}")
+
+        clip = cardnews.build_card_news_clip(forever(), [1.0])
+        try:
+            self.assertEqual(clip.duration, float(cardnews.MAX_CARDS))
+        finally:
+            clip.close()
+
+    def test_an_endless_body_is_cut_off_too(self):
+        """본문 줄도 같은 경로로 들어온다."""
+        from itertools import count
+
+        card = Card(title="제목", body=(f"줄 {i}" for i in count()))
+        self.assertEqual(len(card.body), cardnews.MAX_BODY_LINES)
+
     def test_no_cards_is_an_error(self):
         with self.assertRaises(ValueError):
             cardnews.build_card_news_clip([], [1.0])
