@@ -1,0 +1,341 @@
+"""
+텔레그램으로 쇼츠를 만드는 봇.
+
+밖에 있을 때 영상을 만들려면 이 기계에 닿아야 하는데, 봇은 텔레그램 서버로 나가서
+새 메시지를 물어보는 방식이라 공인 IP 도 포트 개방도 필요 없다. 완성된 영상은 채팅으로
+바로 보내므로 임시 링크를 만들어 둘 필요도 없다.
+
+대본을 먼저 보내 승인을 받고 렌더링한다. 렌더링은 십수 분이 걸리므로, 마음에 들지 않는
+대본에 그 시간을 쓰기 전에 멈출 수 있어야 한다.
+"""
+
+import os
+import threading
+import time
+from typing import Any
+
+import requests
+from loguru import logger
+
+from app.config import config
+from app.models.schema import VideoParams
+from app.services import llm
+from app.services import task as tm
+from app.utils import utils
+
+API_BASE = "https://api.telegram.org"
+POLL_TIMEOUT_SECONDS = 50
+REQUEST_TIMEOUT_SECONDS = POLL_TIMEOUT_SECONDS + 15
+# 봇 파일 전송 한도. 넘으면 텔레그램이 거절하므로 미리 알려준다.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_SUBJECT_LENGTH = 200
+
+
+class TelegramConfigError(RuntimeError):
+    """봇을 켤 수 없는 설정 문제."""
+
+
+def _bot_token() -> str:
+    return str(config.telegram.get("bot_token", "") or "").strip()
+
+
+def _allowed_chat_id() -> int:
+    raw = config.telegram.get("chat_id", "")
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _api_url(method: str) -> str:
+    # 토큰이 주소에 들어간다. 이 값을 로그나 예외 메시지에 실으면 안 된다.
+    return f"{API_BASE}/bot{_bot_token()}/{method}"
+
+
+def _call(method: str, **payload) -> dict[str, Any] | None:
+    """
+    봇 API 를 부르고 결과만 돌려준다. 실패는 기록하고 ``None``.
+
+    통신 실패로 봇 전체가 멈추면, 밖에 있는 동안 아무것도 못 하게 된다. 예외를
+    올리지 않고 다음 폴링으로 넘어간다. 예외 문구에는 요청 주소가 붙어 나올 수
+    있어 토큰이 샐 수 있으므로, 메시지 대신 예외 종류만 남긴다.
+    """
+    try:
+        response = requests.post(
+            _api_url(method), json=payload, timeout=REQUEST_TIMEOUT_SECONDS
+        )
+        body = response.json()
+    except Exception as exc:
+        logger.warning(f"telegram {method} failed: {type(exc).__name__}")
+        return None
+
+    if not body.get("ok"):
+        logger.warning(f"telegram {method} rejected: {body.get('description')}")
+        return None
+    return body.get("result")
+
+
+def _send(chat_id: int, text: str, buttons: list[list[dict]] | None = None) -> None:
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": buttons}
+    _call("sendMessage", **payload)
+
+
+def _send_video(chat_id: int, video_path: str, caption: str) -> None:
+    size = os.path.getsize(video_path)
+    if size > MAX_UPLOAD_BYTES:
+        _send(
+            chat_id,
+            f"영상은 만들었는데 {size // (1024 * 1024)}MB 라 봇으로는 보낼 수 없어요.\n"
+            f"{video_path}",
+        )
+        return
+
+    try:
+        with open(video_path, "rb") as video_file:
+            response = requests.post(
+                _api_url("sendVideo"),
+                data={"chat_id": chat_id, "caption": caption},
+                files={"video": video_file},
+                timeout=REQUEST_TIMEOUT_SECONDS * 4,
+            )
+        if not response.json().get("ok"):
+            raise RuntimeError("telegram rejected the upload")
+    except Exception as exc:
+        logger.warning(f"telegram sendVideo failed: {type(exc).__name__}")
+        _send(chat_id, f"영상 전송에 실패했어요. 파일은 여기 있습니다.\n{video_path}")
+
+
+def _answer_callback(callback_id: str) -> None:
+    # 누른 버튼의 로딩 표시를 지운다. 안 보내면 클라이언트가 계속 도는 것처럼 보인다.
+    _call("answerCallbackQuery", callback_query_id=callback_id)
+
+
+def _build_params(subject: str, script: str) -> VideoParams:
+    """
+    저장된 WebUI 설정 위에 대본만 얹는다.
+
+    봇에서 항목을 하나하나 고르게 하면 대화가 길어진다. 화면에서 맞춰 둔 값을 그대로
+    쓰고, 봇은 주제와 대본만 받는다.
+    """
+    saved = config.ui
+    return VideoParams(
+        video_subject=subject,
+        video_script=script,
+        video_language=str(saved.get("video_language", "") or ""),
+        voice_name=str(saved.get("voice_name", "") or ""),
+        voice_rate=float(saved.get("voice_rate", 1.0) or 1.0),
+        font_name=str(saved.get("font_name", "") or ""),
+        font_size=int(saved.get("font_size", 60) or 60),
+        text_fore_color=str(saved.get("text_fore_color", "#FFFFFF") or "#FFFFFF"),
+        subtitle_enabled=True,
+        layout=str(saved.get("layout", "fullscreen") or "fullscreen"),
+        layout_background_color=str(
+            saved.get("layout_background_color", "#FFFFFF") or "#FFFFFF"
+        ),
+        layout_video_height_ratio=float(
+            saved.get("layout_video_height_ratio", 0.58) or 0.58
+        ),
+        layout_corner_radius=int(saved.get("layout_corner_radius", 0) or 0),
+        headline_color=str(saved.get("headline_color", "#111111") or "#111111"),
+        headline_font_size=int(saved.get("headline_font_size", 86) or 86),
+        subtitle_below_video=bool(saved.get("subtitle_below_video", False)),
+        subtitle_below_color=str(
+            saved.get("subtitle_below_color", "#111111") or "#111111"
+        ),
+    )
+
+
+class ShortsBot:
+    """한 사람만 쓰는 봇이라 상태는 메모리에 둔다."""
+
+    def __init__(self):
+        self.chat_id = _allowed_chat_id()
+        self.offset = 0
+        self.pending: dict[str, str] = {}
+        self.rendering = False
+        self._lock = threading.Lock()
+
+    # ---- 대본 ----
+
+    def _draft_script(self, subject: str) -> None:
+        _send(self.chat_id, "대본 쓰는 중…")
+        script = llm.generate_script(
+            video_subject=subject,
+            language=str(config.ui.get("video_language", "") or ""),
+            paragraph_number=3,
+            script_style="story",
+        )
+        if not script or script.startswith("Error:"):
+            _send(self.chat_id, "대본 생성에 실패했어요. 잠시 후 다시 해보세요.")
+            return
+
+        self.pending = {"subject": subject, "script": script}
+        _send(
+            self.chat_id,
+            f"{script}\n\n— {len(script)}자",
+            buttons=[
+                [
+                    {"text": "승인", "callback_data": "approve"},
+                    {"text": "다시 뽑기", "callback_data": "retry"},
+                    {"text": "취소", "callback_data": "cancel"},
+                ]
+            ],
+        )
+
+    # ---- 렌더링 ----
+
+    def _render(self, subject: str, script: str) -> None:
+        task_id = utils.get_uuid()
+        try:
+            params = _build_params(subject, script)
+            result = tm.start(task_id=task_id, params=params, stop_at="video")
+            videos = (result or {}).get("videos") or []
+            if not videos:
+                _send(self.chat_id, "영상 생성에 실패했어요. 로그를 확인해 주세요.")
+                return
+            _send_video(self.chat_id, videos[0], caption=subject)
+        except Exception as exc:
+            logger.exception(f"telegram render failed: {task_id}")
+            _send(self.chat_id, f"영상 생성 중 오류가 났어요: {type(exc).__name__}")
+        finally:
+            with self._lock:
+                self.rendering = False
+
+    def _start_render(self) -> None:
+        with self._lock:
+            if self.rendering:
+                _send(self.chat_id, "이미 만들고 있어요. 끝나면 보내드릴게요.")
+                return
+            self.rendering = True
+
+        subject = self.pending.get("subject", "")
+        script = self.pending.get("script", "")
+        self.pending = {}
+        _send(self.chat_id, "만들기 시작했어요. 십 분쯤 걸립니다.")
+        # 폴링을 막지 않도록 따로 돌린다. 렌더링 중에도 명령을 받을 수 있어야 한다.
+        threading.Thread(
+            target=self._render, args=(subject, script), daemon=True
+        ).start()
+
+    # ---- 수신 ----
+
+    def _handle_message(self, message: dict) -> None:
+        text = str(message.get("text", "") or "").strip()
+        if not text:
+            return
+
+        if text.startswith("/새영상") or text.startswith("/new"):
+            subject = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            if not subject:
+                _send(self.chat_id, "주제를 함께 보내주세요. 예: /새영상 닭가슴살 맛있게 먹는 법")
+                return
+            self._draft_script(subject[:MAX_SUBJECT_LENGTH])
+            return
+
+        if text.startswith("/상태") or text.startswith("/status"):
+            _send(self.chat_id, "만드는 중이에요." if self.rendering else "쉬고 있어요.")
+            return
+
+        if text.startswith("/"):
+            _send(self.chat_id, "쓸 수 있는 명령: /새영상 <주제>, /상태")
+            return
+
+        # 명령이 아닌 글은 대본을 직접 고쳐 보낸 것으로 본다.
+        if self.pending:
+            self.pending["script"] = text
+            _send(
+                self.chat_id,
+                "고친 대본으로 바꿨어요.",
+                buttons=[
+                    [
+                        {"text": "승인", "callback_data": "approve"},
+                        {"text": "취소", "callback_data": "cancel"},
+                    ]
+                ],
+            )
+
+    def _handle_callback(self, callback: dict) -> None:
+        _answer_callback(str(callback.get("id", "")))
+        action = str(callback.get("data", "") or "")
+
+        if action == "approve":
+            if not self.pending.get("script"):
+                _send(self.chat_id, "승인할 대본이 없어요. /새영상 부터 시작해 주세요.")
+                return
+            self._start_render()
+        elif action == "retry":
+            subject = self.pending.get("subject", "")
+            if subject:
+                self._draft_script(subject)
+        elif action == "cancel":
+            self.pending = {}
+            _send(self.chat_id, "취소했어요.")
+
+    def handle_update(self, update: dict) -> None:
+        """
+        업데이트 하나를 처리한다. 허용한 대화가 아니면 아무것도 하지 않는다.
+
+        봇 이름은 누구나 검색할 수 있다. 여기서 막지 않으면 모르는 사람이 이 기계에서
+        영상 생성을 돌리고 모델 사용료를 쓰게 된다.
+        """
+        source = update.get("message") or update.get("callback_query") or {}
+        chat = source.get("chat") or (source.get("message") or {}).get("chat") or {}
+        incoming_chat_id = chat.get("id")
+
+        if not self.chat_id:
+            # 최초 설정. chat_id 를 알아야 설정에 적을 수 있는데, 그 값은 실제로
+            # 메시지를 받아 봐야 안다. 터미널에만 남기고 아무 동작도 하지 않는다.
+            logger.info(
+                "telegram chat id (config.toml 의 [telegram] chat_id 에 적으세요): "
+                f"{incoming_chat_id}"
+            )
+            return
+
+        if incoming_chat_id != self.chat_id:
+            logger.warning("ignored a telegram update from an unexpected chat")
+            return
+
+        if "message" in update:
+            self._handle_message(update["message"])
+        elif "callback_query" in update:
+            self._handle_callback(update["callback_query"])
+
+    def poll_once(self) -> None:
+        updates = _call(
+            "getUpdates", offset=self.offset, timeout=POLL_TIMEOUT_SECONDS
+        )
+        if not updates:
+            return
+        for update in updates:
+            self.offset = int(update.get("update_id", 0)) + 1
+            try:
+                self.handle_update(update)
+            except Exception:
+                logger.exception("failed to handle a telegram update")
+
+    def run(self) -> None:
+        if not self.chat_id:
+            logger.warning(
+                "telegram chat_id 가 비어 있습니다. 봇에게 아무 메시지나 보내면 "
+                "여기에 chat id 가 찍힙니다. 그 값을 config.toml 에 적고 다시 켜세요."
+            )
+        else:
+            logger.info("telegram bot started")
+            _send(self.chat_id, "준비됐어요. /새영상 <주제> 로 시작하세요.")
+        while True:
+            self.poll_once()
+            # getUpdates 가 롱 폴링이라 보통은 여기서 쉬지 않는다. 통신이 계속
+            # 실패할 때 초당 수십 번 재시도하지 않도록 짧게 눕는다.
+            time.sleep(1)
+
+
+def run_bot() -> int:
+    if not _bot_token():
+        raise TelegramConfigError(
+            "config.toml 의 [telegram] bot_token 이 비어 있습니다. "
+            "@BotFather 에서 봇을 만들고 토큰을 넣으세요."
+        )
+    ShortsBot().run()
+    return 0
