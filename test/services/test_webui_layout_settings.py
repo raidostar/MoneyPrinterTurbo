@@ -23,6 +23,24 @@ def _widget(app, kind, key):
 class TestLayoutControlsExist(unittest.TestCase):
     """카드 레이아웃을 화면에서 고를 수 없으면 WebUI 로는 그 영상을 못 만든다."""
 
+    def test_an_upgrading_user_keeps_the_fullscreen_layout(self):
+        """
+        설정을 저장한 적 없는 사용자가 새 버전을 열기만 해도 카드로 바뀌면, 화면
+        구성이 달라지고 헤드라인 생성 때문에 LLM 호출까지 한 번 더 나간다. 카드는
+        직접 골라야 켜지는 것이어야 한다.
+        """
+        from app.config import config
+
+        saved = config.ui.pop("layout", None)
+        try:
+            app = _app()
+            self.assertEqual(
+                _widget(app, "selectbox", "layout_select_ko").value, "fullscreen"
+            )
+        finally:
+            if saved is not None:
+                config.ui["layout"] = saved
+
     def test_the_card_layout_can_be_chosen_on_screen(self):
         """
         레이아웃은 스키마에만 있었다. 화면에 없으면 WebUI 로 만든 영상은 전부

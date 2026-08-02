@@ -107,7 +107,10 @@ DEFAULT_SUBTITLE_SETTINGS = {
     "rounded_subtitle_background": False,
 }
 DEFAULT_LAYOUT_SETTINGS = {
-    "layout": "card",
+    # 스키마 기본값과 같은 전체화면으로 시작한다. 카드로 바꾸면 화면 구성이 달라지고
+    # 헤드라인 생성을 위해 LLM 을 한 번 더 부르므로, 업그레이드만으로 그렇게 되면 안 된다.
+    # 아래 값들은 카드를 골랐을 때 쓰이는 출발점이다.
+    "layout": "fullscreen",
     "layout_background_color": "#FFFFFF",
     "layout_video_height_ratio": 0.58,
     "layout_corner_radius": 48,
