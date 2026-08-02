@@ -21,6 +21,12 @@ MAX_SCRIPT_SUBJECT_LENGTH = 500
 # 강제하지 않으면 쓸모없는 요청이 그만큼 늘고, 캐시 키도 함께 불어난다.
 MAX_SEARCH_TERM_LENGTH = 60
 MAX_SEARCH_TERMS = 20
+# 프롬프트는 1~3 단어를 요구하지만 판정은 조금 느슨하게 둔다. "man walking hot street"
+# 처럼 네댓 단어짜리 장면 묘사는 검색어로 멀쩡하고, 그걸 버리면 좋은 소재를 잃는다.
+# 그보다 길어지면 검색어가 아니라 문장이므로 받지 않는다.
+MAX_SEARCH_TERM_WORDS = 5
+# 프롬프트가 영어를 요구한다. 제공자 질의로 그대로 나가므로 글자 종류를 못박는다.
+_SEARCH_TERM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 \-']*$")
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _URL_USERINFO_RE = re.compile(
@@ -736,6 +742,9 @@ def _clean_search_terms(terms, amount: int) -> List[str]:
     이 값은 스톡 제공자에게 그대로 질의로 나간다. 개수와 길이를 강제하지 않으면
     쓸모없는 외부 요청이 그만큼 늘고, 검색 캐시 키도 함께 불어난다. 빈 값과 중복은
     같은 이유로 걸러낸다.
+
+    형식을 어긴 항목은 잘라서 쓰지 않고 버린다. 문장이나 다른 문자 체계를 잘라 봐야
+    검색어가 되지 않고, 원래 뜻과 다른 질의만 남는다.
     """
     limit = max(1, min(int(amount or 1), MAX_SEARCH_TERMS))
     cleaned: list[str] = []
@@ -743,8 +752,16 @@ def _clean_search_terms(terms, amount: int) -> List[str]:
         if not isinstance(term, str):
             continue
         # 줄바꿈이 섞이면 질의 문자열이 두 줄이 된다. 공백으로 눌러 한 줄로 만든다.
-        value = " ".join(term.split())[:MAX_SEARCH_TERM_LENGTH]
-        if value and value not in cleaned:
+        value = " ".join(term.split())
+        if (
+            not value
+            or len(value) > MAX_SEARCH_TERM_LENGTH
+            or len(value.split()) > MAX_SEARCH_TERM_WORDS
+            or not _SEARCH_TERM_RE.match(value)
+        ):
+            logger.warning(f"dropped a malformed search term ({len(value)} characters)")
+            continue
+        if value not in cleaned:
             cleaned.append(value)
         if len(cleaned) >= limit:
             break
