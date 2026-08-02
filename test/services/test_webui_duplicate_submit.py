@@ -20,28 +20,23 @@ class TestDuplicateSubmit(unittest.TestCase):
     def tearDown(self):
         sm.state.delete_task("same-task")
 
-    def test_a_second_submit_of_a_running_task_is_ignored(self):
+    def test_a_running_task_is_refused_but_a_finished_one_can_run_again(self):
         """
         페이지가 다시 실행되면서 같은 작업 ID 로 제출이 반복될 수 있다. 막지 않으면
         같은 영상을 만드는 렌더링이 여러 개 떠서 같은 출력 파일에 동시에 쓴다.
+
+        그렇다고 영영 막으면 '다시 만들기' 가 사라진다. 돌고 있는 동안만 거절해야
+        한다 — 세 번 제출했지만 실제로 도는 것은 두 번이어야 한다.
         """
         with patch.object(webui_task._task_manager, "add_task") as add_task:
             webui_task.submit_generation("same-task", self.params)
             webui_task.submit_generation("same-task", self.params)
+            self.assertEqual(add_task.call_count, 1, "도는 중에 또 시작했다")
 
-        add_task.assert_called_once()
-
-    def test_the_same_task_can_be_submitted_once_it_stops_running(self):
-        """
-        돌고 있는 것만 거절해야 한다. 한 번 만든 작업을 영영 다시 못 만들면,
-        중복을 막으려다 '다시 만들기' 를 없애는 셈이다.
-        """
-        with patch.object(webui_task._task_manager, "add_task") as add_task:
-            webui_task.submit_generation("same-task", self.params)
             sm.state.update_task("same-task", state=const.TASK_STATE_COMPLETE)
             webui_task.submit_generation("same-task", self.params)
 
-        self.assertEqual(add_task.call_count, 2)
+        self.assertEqual(add_task.call_count, 2, "끝난 작업을 다시 만들 수 없다")
 
     def test_only_one_of_many_concurrent_submits_gets_through(self):
         """
