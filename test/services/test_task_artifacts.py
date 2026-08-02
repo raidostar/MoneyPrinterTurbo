@@ -225,4 +225,3 @@ class TestHeadlineRecording(unittest.TestCase):
             (Path(self.temp_dir.name) / "script.json").read_text(encoding="utf-8")
         )
         self.assertEqual(recorded["headline"], "하나\n둘")
-
