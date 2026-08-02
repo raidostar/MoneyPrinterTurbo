@@ -75,28 +75,41 @@ class TestRestoreFromUrl(unittest.TestCase):
         self.assertEqual(app.session_state["layout_corner_radius_slider"], 12)
         self.assertEqual(app.session_state["headline_font_size_slider"], 64)
 
-    def test_without_the_parameter_nothing_is_filled(self):
-        """주소에 작업이 없으면 평소처럼 빈 화면으로 시작해야 한다."""
-        app = _app_with_task(self.tmp_path, {})
-        self.assertEqual(app.session_state["video_subject"], "")
-
     def test_an_unknown_task_does_not_break_the_page(self):
-        """오래된 링크나 지워진 작업 하나로 화면 전체가 뜨지 않으면 안 된다."""
+        """
+        오래된 링크나 지워진 작업 하나로 화면 전체가 뜨면 안 된다. 주소를 읽고
+        시도는 했는지까지 확인한다 — 안 읽었어도 화면은 멀쩡하기 때문이다.
+        """
         app = _app_with_task(self.tmp_path, {"task": "does-not-exist"})
+
+        # 주소를 읽고 시도했다는 표시. 안 읽었어도 화면은 멀쩡하므로 이걸 봐야 한다.
+        self.assertEqual(
+            app.session_state["url_task_restore_applied"], "does-not-exist"
+        )
         self.assertEqual(app.session_state["video_subject"], "")
         self.assertFalse(app.exception)
 
     def test_a_traversal_path_is_refused(self):
-        """작업 이름은 주소에서 온다. 작업 디렉터리 밖을 가리키면 안 된다."""
+        """
+        작업 이름은 주소에서 온다. 작업 디렉터리 밖을 가리키는 값이 그대로 로더에
+        전달되더라도, 로더의 경로 검증에서 막혀 아무것도 채워지지 않아야 한다.
+        """
         app = _app_with_task(self.tmp_path, {"task": "../../etc"})
+
+        self.assertEqual(app.session_state["url_task_restore_applied"], "../../etc")
         self.assertEqual(app.session_state["video_subject"], "")
         self.assertFalse(app.exception)
+        self.assertNotIn("task_restore_payload", app.session_state)
 
     def test_edits_are_not_overwritten_on_the_next_rerun(self):
         """
         rerun 마다 다시 채우면, 불러온 대본을 고치는 순간 원래 내용으로 되돌아간다.
         """
         app = _app_with_task(self.tmp_path, {"task": TASK_ID})
+        self.assertEqual(
+            app.session_state["video_subject"], SCRIPT_DATA["params"]["video_subject"]
+        )
+
         app.session_state["video_subject"] = "내가 고친 주제"
         with patch("app.utils.utils.task_dir", return_value=str(self.tmp_path)):
             app.run()
