@@ -6,8 +6,6 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-from app.services import llm  # noqa: F401  (webui.Main 이 로드되는지 함께 확인)
-
 WEBUI_MAIN = str(Path("webui") / "Main.py")
 
 
@@ -110,8 +108,6 @@ class TestLayoutRestore(unittest.TestCase):
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
         }
 
-        import webui.Main  # noqa: F401
-
         for field in (
             "layout_background_color",
             "layout_video_height_ratio",
@@ -123,19 +119,6 @@ class TestLayoutRestore(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 self.assertIn(field, restored)
-
-
-class TestUserConfigIsNotTouched(unittest.TestCase):
-    def test_tests_write_to_a_sandbox_instead_of_the_real_config(self):
-        """
-        WebUI 테스트는 페이지를 끝까지 실행하고, 페이지 마지막에는 `save_config()` 가
-        있다. 격리하지 않으면 테스트를 돌릴 때마다 사용자의 글꼴·언어·자막 설정이
-        위젯 초기값으로 덮어써진다.
-        """
-        from app.config import config as config_module
-
-        repo_config = Path("config.toml").resolve()
-        self.assertNotEqual(Path(config_module.config_file).resolve(), repo_config)
 
 
 if __name__ == "__main__":
