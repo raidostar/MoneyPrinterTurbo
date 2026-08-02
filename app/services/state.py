@@ -12,6 +12,10 @@ if redis.call("HGET", KEYS[1], "state") == ARGV[1] then
     return 0
 end
 
+-- 지난 실행이 남긴 영상 목록, 오류, 업로드 상태를 함께 지운다. HSET 만 하면 이번
+-- 실행과 상관없는 필드가 그대로 붙어 있어, 기록이 실제 결과와 어긋난다.
+redis.call("DEL", KEYS[1])
+
 for index = 2, #ARGV, 2 do
     redis.call("HSET", KEYS[1], ARGV[index], ARGV[index + 1])
 end
