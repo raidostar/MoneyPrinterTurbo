@@ -895,12 +895,14 @@ Please note that you must use English for generating video search terms; Chinese
                         # 문제인지 구분할 수 없다.
                         logger.warning(f"failed to generate video terms: {str(e)}")
 
-        if search_terms and len(search_terms) > 0:
+        # 정리까지 마친 뒤에 판정한다. 형식을 어긴 응답은 여기서 전부 걸러지는데,
+        # 루프 밖에서 정리하면 남은 재시도를 쓰지 못하고 빈 목록으로 끝난다.
+        search_terms = _clean_search_terms(search_terms, amount)
+        if search_terms:
             break
         if i < _max_retries:
             logger.warning(f"failed to generate video terms, trying again... {i + 1}")
 
-    search_terms = _clean_search_terms(search_terms, amount)
     logger.success(f"completed: \n{search_terms}")
     return search_terms
 

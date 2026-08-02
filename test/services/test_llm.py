@@ -1672,3 +1672,18 @@ class TestSearchTermsAreBounded(unittest.TestCase):
         self.assertLess(len(captured["prompt"]), 20_000)
         self.assertEqual(terms, ["cafe sign"])
 
+    def test_a_wholly_malformed_response_is_retried(self):
+        """
+        형식을 어긴 응답은 정리에서 전부 걸러진다. 그 판정을 재시도 루프 밖에서
+        하면, 재시도가 남았는데도 빈 목록으로 끝나 작업 전체가 실패한다.
+        """
+        responses = [
+            json.dumps(["busy caf\u00e9", "chef & customer"]),
+            json.dumps(["cafe sign", "hot street"]),
+        ]
+
+        with patch.object(llm, "_generate_response", side_effect=responses):
+            terms = llm.generate_terms("주제", "본문", amount=5)
+
+        self.assertEqual(terms, ["cafe sign", "hot street"])
+
