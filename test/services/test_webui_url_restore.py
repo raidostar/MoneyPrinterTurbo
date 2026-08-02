@@ -47,9 +47,14 @@ class TestRestoreFromUrl(unittest.TestCase):
 
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_path = self._tmp.name
+        # 작업 폴더 밖을 가리키는 대상도 정리 대상 안에 둔다. 시스템 임시
+        # 디렉터리에 남기면 반복 실행이나 병렬 실행에서 서로 부딪힌다.
+        self._outside_tmp = tempfile.TemporaryDirectory()
+        self.outside_path = self._outside_tmp.name
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._outside_tmp.cleanup()
 
     def test_opening_with_a_task_id_fills_the_form(self):
         """
@@ -116,7 +121,7 @@ class TestRestoreFromUrl(unittest.TestCase):
         """작업 디렉터리 안의 심볼릭 링크로 밖을 가리키는 것도 막아야 한다."""
         import os
 
-        outside = Path(self.tmp_path).parent / "outside-task"
+        outside = Path(self.outside_path) / "outside-task"
         outside.mkdir(exist_ok=True)
         (outside / "script.json").write_text(
             json.dumps(SCRIPT_DATA, ensure_ascii=False), encoding="utf-8"
