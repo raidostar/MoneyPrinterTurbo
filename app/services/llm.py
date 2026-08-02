@@ -16,6 +16,7 @@ MIN_SCRIPT_PARAGRAPH_NUMBER = 1
 MAX_SCRIPT_PARAGRAPH_NUMBER = 10
 MAX_SCRIPT_PROMPT_LENGTH = 2000
 MAX_SCRIPT_SYSTEM_PROMPT_LENGTH = 8000
+MAX_SCRIPT_SUBJECT_LENGTH = 500
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _URL_USERINFO_RE = re.compile(
@@ -586,6 +587,11 @@ def build_script_prompt(
     )
     custom_system_prompt = _limit_script_text(
         custom_system_prompt, MAX_SCRIPT_SYSTEM_PROMPT_LENGTH, "custom_system_prompt"
+    )
+    # 스키마와 CLI 가 각자 상한을 두지만, 이 함수는 서비스 안에서도 직접 불린다.
+    # 상한은 프롬프트를 만드는 자리에 있어야 어느 입구로 들어와도 지켜진다.
+    video_subject = _limit_script_text(
+        video_subject, MAX_SCRIPT_SUBJECT_LENGTH, "video_subject"
     )
 
     # '대본 생성 규칙' 과 '런타임 컨텍스트' 를 나눠서 이어 붙인다. 이렇게 하면 고급 사용자가

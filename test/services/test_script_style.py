@@ -49,6 +49,14 @@ class TestScriptStyleSelection(unittest.TestCase):
         self.assertNotIn("<", body)
         self.assertNotIn(">", body)
 
+    def test_the_subject_is_capped(self):
+        """
+        스키마와 CLI 가 각자 막지만, 이 함수는 서비스 안에서도 직접 불린다. 상한이
+        프롬프트를 만드는 자리에 없으면 어느 입구 하나만 새도 모델 비용이 튄다.
+        """
+        prompt = llm.build_script_prompt(video_subject="주" * 100_000)
+        self.assertLess(len(prompt), 10_000)
+
     def test_the_script_language_value_is_capped(self):
         """`video_language` 는 스키마에 상한이 없다. 프롬프트에 그대로 실으면 안 된다."""
         prompt = llm.build_script_prompt(video_subject="주제", language="ko" * 10_000)
