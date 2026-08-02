@@ -1104,6 +1104,24 @@ def _subtitle_below_video_enabled(params) -> bool:
     )
 
 
+# 화면에 얹히는 헤드라인은 두 줄이다. 생성 쪽(llm.MAX_HEADLINE_LINE_LENGTH,
+# HEADLINE_LINES)에서도 같은 값을 강제하지만, 사람이 직접 써 넣는 경로가 따로 있어
+# 그리는 자리에서 한 번 더 막는다.
+HEADLINE_LINES = 2
+MAX_HEADLINE_LINE_LENGTH = 22
+# 영상 띠가 이보다 얇아지면 카드가 아니라 띠 하나만 남는다. 헤드라인이 아무리
+# 커도 화면의 주인공을 밀어내서는 안 된다.
+MIN_CARD_VIDEO_HEIGHT_RATIO = 0.3
+
+
+def _clamp_headline(text: str) -> str:
+    """직접 써 넣은 헤드라인도 두 줄, 줄당 길이 제한 안에 들어오게 자른다."""
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    return "\n".join(
+        line[:MAX_HEADLINE_LINE_LENGTH] for line in lines[:HEADLINE_LINES]
+    )
+
+
 def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
     """
     상단 여백에 얹을 두 줄 헤드라인 클립을 만든다. 문구가 없으면 ``None``.
@@ -1111,7 +1129,7 @@ def _headline_clip(params, font_path: str, canvas_width: int, duration: float):
     자막과 달리 영상 위가 아니라 여백 위에 놓이므로, 자막 색을 그대로 쓰면 배경과
     같은 색이 되어 사라질 수 있다. 색을 따로 받는 이유다.
     """
-    text = str(getattr(params, "headline", "") or "").strip()
+    text = _clamp_headline(getattr(params, "headline", ""))
     if not text:
         return None
 
@@ -1206,7 +1224,10 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
         int(canvas_height * params.layout_video_height_ratio),
         canvas_height - 2 * _reserved_margin(params, headline),
     )
-    target_height = max(1, min(target_height, canvas_height))
+    # 여백을 확보하다 영상이 사라져서는 안 된다. 얹을 것이 아무리 커도 영상이
+    # 화면의 주인공이다.
+    floor = int(canvas_height * MIN_CARD_VIDEO_HEIGHT_RATIO)
+    target_height = max(floor, min(target_height, canvas_height))
 
     scale = canvas_width / video_clip.w
     scaled = video_clip.resized(
