@@ -1,6 +1,7 @@
 """같은 작업이 두 번 제출되는 것을 막는다."""
 
 import ast
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,10 @@ from app.services import webui_task
 class TestDuplicateSubmit(unittest.TestCase):
     def setUp(self):
         self.params = VideoParams(video_subject="커피")
+        sm.state.delete_task("same-task")
+
+    def tearDown(self):
+        sm.state.delete_task("same-task")
 
     def test_a_second_submit_of_a_running_task_is_ignored(self):
         """
@@ -21,31 +26,42 @@ class TestDuplicateSubmit(unittest.TestCase):
         같은 영상을 만드는 렌더링이 여러 개 떠서 같은 출력 파일에 동시에 쓴다.
         """
         with patch.object(webui_task._task_manager, "add_task") as add_task:
-            with patch.object(
-                sm.state,
-                "get_task",
-                return_value={"state": const.TASK_STATE_PROCESSING},
-            ):
-                webui_task.submit_generation("busy-task", self.params)
+            webui_task.submit_generation("same-task", self.params)
+            webui_task.submit_generation("same-task", self.params)
 
-        add_task.assert_not_called()
+        add_task.assert_called_once()
 
     def test_the_same_task_can_be_submitted_once_it_stops_running(self):
         """
         돌고 있는 것만 거절해야 한다. 한 번 만든 작업을 영영 다시 못 만들면,
         중복을 막으려다 '다시 만들기' 를 없애는 셈이다.
         """
-        states = [
-            {"state": const.TASK_STATE_PROCESSING},
-            {"state": const.TASK_STATE_COMPLETE},
-        ]
         with patch.object(webui_task._task_manager, "add_task") as add_task:
-            with patch.object(sm.state, "get_task", side_effect=states):
-                webui_task.submit_generation("same-task", self.params)
-                add_task.assert_not_called()
+            webui_task.submit_generation("same-task", self.params)
+            sm.state.update_task("same-task", state=const.TASK_STATE_COMPLETE)
+            webui_task.submit_generation("same-task", self.params)
 
-                webui_task.submit_generation("same-task", self.params)
-                add_task.assert_called_once()
+        self.assertEqual(add_task.call_count, 2)
+
+    def test_only_one_of_many_concurrent_submits_gets_through(self):
+        """
+        확인과 기록이 나뉘어 있으면 두 요청이 동시에 '비어 있다' 를 보고 둘 다
+        시작한다. 페이지 rerun 이 겹치면 실제로 일어나는 일이다.
+        """
+        start = threading.Barrier(8)
+
+        def submit():
+            start.wait()
+            webui_task.submit_generation("same-task", self.params)
+
+        with patch.object(webui_task._task_manager, "add_task") as add_task:
+            threads = [threading.Thread(target=submit) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        add_task.assert_called_once()
 
 
 class TestPendingIdIsCleared(unittest.TestCase):
