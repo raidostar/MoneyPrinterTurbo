@@ -52,11 +52,20 @@ class TestWrapping(unittest.TestCase):
         for line in lines:
             self.assertLessEqual(int(draw.textlength(line, font=font)), 800)
 
-    def test_words_break_at_spaces_when_they_can(self):
+    def test_words_are_packed_until_the_line_is_full(self):
+        """
+        폭이 남는데도 한 줄에 한 단어씩 내려보내면, 카드가 세로로 길어져 아래
+        내용이 밀려난다. 들어갈 만큼은 채워야 한다.
+        """
         draw = _draw()
         font = cardnews._font(cardnews.BODY_FONT, 40)
-        lines = cardnews.wrap_text(draw, "하나 둘 셋 넷 다섯 여섯 일곱", font, 300)
-        self.assertTrue(all(" " in line or len(line.split()) == 1 for line in lines))
+        # 두 단어는 들어가고 세 단어는 넘치는 폭을 만든다.
+        width = int(draw.textlength("하나 둘", font=font)) + 4
+        self.assertLess(int(draw.textlength("하나 둘 셋", font=font)), 10_000)
+
+        lines = cardnews.wrap_text(draw, "하나 둘 셋 넷", font, width)
+
+        self.assertEqual(lines, ["하나 둘", "셋 넷"])
 
 
 class TestFooter(unittest.TestCase):
