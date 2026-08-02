@@ -122,6 +122,19 @@ def _run_generation(
                 )
 
 
+def _is_already_running(task_id: str) -> bool:
+    """
+    같은 작업이 이미 돌고 있는지 본다.
+
+    페이지가 다시 실행되면서 같은 작업 ID 로 제출이 반복될 수 있다. 그대로 두면 같은
+    영상을 만드는 렌더링이 여러 개 떠서 CPU 를 나눠 갖고, 무엇보다 같은 출력 파일에
+    동시에 쓴다. 실제로 한 번의 제출이 여섯 번 실행돼 결과가 나올 때까지 몇 배로
+    오래 걸린 적이 있다.
+    """
+    task = sm.state.get_task(task_id)
+    return bool(task) and task.get("state") == const.TASK_STATE_PROCESSING
+
+
 def submit_generation(
     task_id: str,
     params: VideoParams,
@@ -134,7 +147,14 @@ def submit_generation(
     작업 상태는 반드시 스레드를 시작하기 전에 기록해야 한다. 그래야 이번 페이지 스크립트
     실행이 끝나는 시점에 작업을 조회할 수 있고, 브라우저 새로고침이나 WebSocket 재연결도
     예전 페이지 메모리의 자리표시자에 의존하지 않는다.
+
+    이미 돌고 있는 작업이면 아무것도 하지 않는다. 두 번째 제출은 첫 번째를 빠르게
+    만들지 않고, 같은 파일을 함께 덮어써 결과를 망칠 뿐이다.
     """
+    if _is_already_running(task_id):
+        logger.warning(f"ignored a duplicate generation submit: task_id={task_id}")
+        return
+
     task_params = params.model_copy(deep=True)
     # 미리보기 페이로드에는 변경되지 않는 오디오 경로, 파라미터 스냅샷, 읽기 전용 자막
     # 타임라인만 들어 있다. 최상위 딕셔너리를 복사해, 이후 페이지 rerun 이 캐시 필드를
