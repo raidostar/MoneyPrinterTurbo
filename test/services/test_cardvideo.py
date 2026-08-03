@@ -385,7 +385,27 @@ class TestOutputLocation(unittest.TestCase):
             with _task_dir() as work:
                 result = cardvideo.render_card_news("t", _script(3), _params())
 
-        self.assertTrue(result.video_path.startswith(work))
+        # 공용 검사기가 realpath 로 푼다. macOS 의 /var 는 /private/var 로 바뀐다.
+        self.assertTrue(result.video_path.startswith(os.path.realpath(work)))
+
+    def test_a_task_name_cannot_point_outside_the_task_directory(self):
+        """
+        task 이름도 밖에서 오는 값이다. 여기서 만드는 파일은 지우고 덮어쓰는
+        것들이라, 작업 디렉터리를 벗어나면 남의 파일을 건드린다.
+        """
+        for hostile in ("../../etc", "/etc", "sub/../../../etc"):
+            with self.subTest(task_id=hostile):
+                with (
+                    patch.object(cardvideo, "_narrate") as narrate,
+                    _silent_moviepy(6.0),
+                    _task_dir(),
+                ):
+                    result = cardvideo.render_card_news(
+                        hostile, _script(3), _params()
+                    )
+
+                self.assertIsNone(result)
+                narrate.assert_not_called()
 
 
 if __name__ == "__main__":
