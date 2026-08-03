@@ -209,7 +209,6 @@ class ShortsBot:
         self._lock = threading.Lock()
         # 오늘 보여 준 후보. 버튼을 누르면 여기서 찾는다.
         self.candidates: dict[str, object] = {}
-        self.last_daily_date = ""
 
     # ---- 매일 ----
 
@@ -230,7 +229,7 @@ class ShortsBot:
         정해진 시각이 지났고 오늘 아직 안 보냈으면 후보를 보낸다.
 
         날짜로 기억한다. 시각만 보면 그 시간대 안에서 폴링이 도는 동안 계속
-        보내게 되고, 몇 분마다 같은 목록이 온다.
+        보내게 되고, 몇 분마다 같은 목록이 온다. 그 날짜는 파일에 남긴다.
         """
         hour = self._daily_hour()
         if hour is None:
@@ -238,33 +237,40 @@ class ShortsBot:
 
         now = now or time.localtime()
         today = time.strftime("%Y-%m-%d", now)
-        if self.last_daily_date == today or now.tm_hour < hour:
+        # 파일에서 읽는다. 메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다.
+        if daily.load_last_run() == today or now.tm_hour < hour:
             return False
 
-        # 보여 주는 데 성공한 다음에 날짜를 적는다. 먼저 적으면 잠깐의 장애가
-        # 그날의 모든 재시도를 막는다.
+        # 마친 다음에 날짜를 적는다. 먼저 적으면 잠깐의 장애가 그날의 모든
+        # 재시도를 막는다.
         if not self._offer_today():
             return False
-        self.last_daily_date = today
+        daily.save_last_run(today)
         return True
 
     # ---- 오늘의 소재 ----
 
     def _offer_today(self) -> bool:
         """
-        오늘 다룰 만한 것을 찾아 후보로 보여 준다. 보여 줬으면 ``True``.
+        오늘 다룰 만한 것을 찾아 후보로 보여 준다. 오늘 몫을 마쳤으면 ``True``.
 
-        수집 실패도 '오늘 새 글이 없음' 도 빈 목록으로 온다. 둘을 구분하지 않고
-        보냈다고 치면, 잠깐의 장애 하나로 그날 하루가 통째로 넘어간다.
+        새 글이 없는 날도 마친 것이다. 못 닿았을 때만 안 마친 것으로 둔다 —
+        둘을 같이 다루면 한쪽은 하루를 통째로 건너뛰고 다른 쪽은 폴링마다
+        같은 안내를 보낸다.
         """
         _send(self.chat_id, "오늘 올라온 것 보는 중…")
-        picks = daily.pick_items(limit=DAILY_CANDIDATES)
-        if not picks:
-            _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
+        run = daily.pick_items(limit=DAILY_CANDIDATES)
+        if not run.source_reachable:
+            _send(self.chat_id, "지금 소스에 못 닿았어요. 이따 다시 볼게요.")
             return False
+        if not run.picks:
+            # 오늘 새 글이 없는 것도 정상적인 결과다. 실패로 치면 그날 내내
+            # 폴링마다 같은 안내가 나간다.
+            _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
+            return True
 
         self.candidates = {}
-        for index, pick in enumerate(picks, start=1):
+        for index, pick in enumerate(run.picks, start=1):
             token = uuid4().hex[:8]
             self.candidates[token] = pick.item
             _send(

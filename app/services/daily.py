@@ -18,6 +18,7 @@ from app.services.sources.base import SourceItem
 from app.utils import utils
 
 SEEN_FILE = "daily_seen.json"
+STATE_FILE = "daily_state.json"
 # 다룬 소재를 기억하는 기간. 이보다 오래된 것은 지운다. 반년 전에 한 번 나왔던
 # 글이 다시 화제가 되면 그건 다시 다룰 만하다.
 SEEN_TTL_DAYS = 45
@@ -34,8 +35,76 @@ class DailyPick:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class DailyRun:
+    """
+    한 번 훑은 결과.
+
+    후보가 없는 것과 소스에 못 닿은 것은 다르다. 같은 값으로 돌려주면 부르는 쪽이
+    잠깐의 장애에 계속 다시 물어보게 되고, 오늘 새 글이 없는 날에도 그렇게 된다.
+    """
+
+    picks: tuple[DailyPick, ...] = ()
+    source_reachable: bool = True
+
+
 def _seen_path() -> str:
     return os.path.join(utils.storage_dir(create=True), SEEN_FILE)
+
+
+def _state_path() -> str:
+    return os.path.join(utils.storage_dir(create=True), STATE_FILE)
+
+
+def _write_json(path: str, payload) -> None:
+    """
+    임시 파일에 쓰고 바꿔치기한다.
+
+    같은 파일에 바로 쓰면 도중에 멈췄을 때 반쯤 쓰인 파일이 남고, 다음 실행이
+    그걸 읽지 못해 기록을 통째로 잃는다.
+    """
+    handle = None
+    temporary = ""
+    try:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".daily-", suffix=".json", dir=os.path.dirname(path)
+        )
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        json.dump(payload, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+        handle = None
+        os.replace(temporary, path)
+        temporary = ""
+    except OSError as exc:
+        logger.warning(f"could not save {os.path.basename(path)}: {type(exc).__name__}")
+    finally:
+        if handle is not None:
+            handle.close()
+        if temporary and os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def load_last_run() -> str:
+    """
+    마지막으로 후보를 보낸 날짜. 없으면 빈 문자열.
+
+    메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다.
+    """
+    try:
+        with open(_state_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    value = data.get("last_daily_date")
+    return value if isinstance(value, str) else ""
+
+
+def save_last_run(date: str) -> None:
+    _write_json(_state_path(), {"last_daily_date": str(date)})
 
 
 def _key(item: SourceItem) -> str:
@@ -89,28 +158,7 @@ def save_seen(seen: dict[str, float]) -> None:
         newest = sorted(seen.items(), key=lambda pair: pair[1], reverse=True)
         seen = dict(newest[:MAX_SEEN_ENTRIES])
 
-    path = _seen_path()
-    handle = None
-    temporary = ""
-    try:
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=".daily-seen-", suffix=".json", dir=os.path.dirname(path)
-        )
-        handle = os.fdopen(descriptor, "w", encoding="utf-8")
-        json.dump(seen, handle)
-        handle.flush()
-        os.fsync(handle.fileno())
-        handle.close()
-        handle = None
-        os.replace(temporary, path)
-        temporary = ""
-    except OSError as exc:
-        logger.warning(f"could not save the seen-items record: {type(exc).__name__}")
-    finally:
-        if handle is not None:
-            handle.close()
-        if temporary and os.path.exists(temporary):
-            os.remove(temporary)
+    _write_json(_seen_path(), seen)
 
 
 def pick_items(
@@ -118,9 +166,9 @@ def pick_items(
     min_points: int = 100,
     within_hours: int = 24,
     tags: str = "show_hn",
-) -> list[DailyPick]:
+) -> DailyRun:
     """
-    오늘 다룰 후보를 고른다. 없으면 빈 목록.
+    오늘 다룰 후보를 고른다.
 
     기록에 남기지는 않는다. 후보를 보여 준 것과 실제로 영상을 만든 것은 다르고,
     보기만 하고 넘어간 소재는 내일 다시 후보가 되어야 한다.
@@ -128,8 +176,10 @@ def pick_items(
     items = hackernews.fetch_items(
         min_points=min_points, within_hours=within_hours, limit=50, tags=tags
     )
+    if items is None:
+        return DailyRun(source_reachable=False)
     if not items:
-        return []
+        return DailyRun()
 
     seen = load_seen()
     picks = []
@@ -141,7 +191,7 @@ def pick_items(
             break
 
     logger.info(f"picked {len(picks)} of {len(items)} items for today")
-    return picks
+    return DailyRun(picks=tuple(picks))
 
 
 def mark_used(item: SourceItem) -> None:

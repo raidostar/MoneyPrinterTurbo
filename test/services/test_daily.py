@@ -44,9 +44,9 @@ class TestNotRepeatingYesterday(unittest.TestCase):
         with _Storage():
             with patch.object(daily.hackernews, "fetch_items", return_value=items):
                 daily.mark_used(items[0])
-                picks = daily.pick_items(limit=3)
+                run = daily.pick_items(limit=3)
 
-        self.assertEqual([p.item.item_id for p in picks], ["2", "3"])
+        self.assertEqual([p.item.item_id for p in run.picks], ["2", "3"])
 
     def test_showing_a_candidate_does_not_count_as_making_it(self):
         """
@@ -59,7 +59,7 @@ class TestNotRepeatingYesterday(unittest.TestCase):
                 daily.pick_items(limit=2)
                 again = daily.pick_items(limit=2)
 
-        self.assertEqual([p.item.item_id for p in again], ["1", "2"])
+        self.assertEqual([p.item.item_id for p in again.picks], ["1", "2"])
 
     def test_an_old_record_stops_blocking_the_item(self):
         """
@@ -73,14 +73,33 @@ class TestNotRepeatingYesterday(unittest.TestCase):
             with patch.object(
                 daily.hackernews, "fetch_items", return_value=[_item("1")]
             ):
-                picks = daily.pick_items(limit=1)
+                run = daily.pick_items(limit=1)
 
-        self.assertEqual([p.item.item_id for p in picks], ["1"])
+        self.assertEqual([p.item.item_id for p in run.picks], ["1"])
 
-    def test_no_items_is_not_an_error(self):
+    def test_no_matching_stories_still_counts_as_a_successful_look(self):
+        """
+        오늘 새 글이 없는 것과 소스에 못 닿은 것은 다르다. 같이 다루면 조용한
+        날마다 폴링이 계속 다시 물어본다.
+        """
         with _Storage():
             with patch.object(daily.hackernews, "fetch_items", return_value=[]):
-                self.assertEqual(daily.pick_items(), [])
+                run = daily.pick_items()
+        self.assertEqual(run.picks, ())
+        self.assertTrue(run.source_reachable)
+
+    def test_an_unreachable_source_says_so(self):
+        with _Storage():
+            with patch.object(daily.hackernews, "fetch_items", return_value=None):
+                run = daily.pick_items()
+        self.assertFalse(run.source_reachable)
+
+    def test_the_last_run_date_survives_a_restart(self):
+        """메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다."""
+        with _Storage():
+            self.assertEqual(daily.load_last_run(), "")
+            daily.save_last_run("2026-08-03")
+            self.assertEqual(daily.load_last_run(), "2026-08-03")
 
 
 class TestTheRecordSurvivesTrouble(unittest.TestCase):

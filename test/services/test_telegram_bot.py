@@ -375,16 +375,16 @@ class TestDailyFlow(unittest.TestCase):
         """
         고르기 전에 만들기 시작하면, 안 쓸 소재에 십 분을 쓴다.
         """
-        from app.services.daily import DailyPick
+        from app.services.daily import DailyPick, DailyRun
         from app.services.sources.base import SourceItem
 
-        picks = [
+        run = DailyRun(picks=tuple(
             DailyPick(item=SourceItem(source="hackernews", item_id=str(i), title=f"글 {i}"), reason="100 points")
             for i in range(3)
-        ]
+        ))
         shorts = self._bot()
         with (
-            patch.object(bot.daily, "pick_items", return_value=picks),
+            patch.object(bot.daily, "pick_items", return_value=run),
             patch.object(bot, "_send") as send,
             patch.object(bot.cardscript, "build_card_script") as build,
         ):
@@ -517,12 +517,78 @@ class TestDailySchedule(unittest.TestCase):
         shorts = self._bot("9")
         with (
             patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
-            patch.object(shorts, "_offer_today") as offer,
+            patch.object(bot.daily, "load_last_run", side_effect=["", "2026-08-03"]),
+            patch.object(bot.daily, "save_last_run") as save,
+            patch.object(shorts, "_offer_today", return_value=True) as offer,
         ):
             self.assertTrue(shorts.maybe_run_daily(self._at(9)))
             self.assertFalse(shorts.maybe_run_daily(self._at(10)))
 
         self.assertEqual(offer.call_count, 1)
+        # 날짜를 남기지 않으면 다시 켰을 때 그날 목록이 또 나간다.
+        save.assert_called_once_with("2026-08-03")
+
+    def test_a_quiet_day_is_not_retried_all_day(self):
+        """
+        새 글이 없는 날도 오늘 몫을 마친 것이다. 실패로 치면 폴링마다 소스에 다시
+        물어보고 같은 안내를 계속 보낸다.
+        """
+        from app.services.daily import DailyRun
+
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "pick_items", return_value=DailyRun()) as pick,
+            patch.object(bot.daily, "load_last_run", side_effect=["", "2026-08-03"]),
+            patch.object(bot.daily, "save_last_run"),
+            patch.object(bot, "_send"),
+        ):
+            self.assertTrue(shorts.maybe_run_daily(self._at(9)))
+            self.assertFalse(shorts.maybe_run_daily(self._at(10)))
+
+        self.assertEqual(pick.call_count, 1)
+
+    def test_a_quiet_day_says_so_instead_of_showing_an_empty_list(self):
+        """후보가 없는데 목록 안내만 지나가면 무슨 일이 있었는지 알 수 없다."""
+        from app.services.daily import DailyRun
+
+        shorts = self._bot("9")
+        with (
+            patch.object(bot.daily, "pick_items", return_value=DailyRun()),
+            patch.object(bot, "_send") as send,
+        ):
+            self.assertTrue(shorts._offer_today())
+
+        messages = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("새로 다룰 만한 게 없어요", messages)
+        self.assertEqual(shorts.candidates, {})
+
+    def test_an_unreachable_source_is_tried_again(self):
+        """못 닿은 건 마친 게 아니다."""
+        from app.services.daily import DailyRun
+
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "pick_items", return_value=DailyRun(source_reachable=False)),
+            patch.object(bot.daily, "load_last_run", return_value=""),
+            patch.object(bot.daily, "save_last_run") as save,
+            patch.object(bot, "_send"),
+        ):
+            self.assertFalse(shorts.maybe_run_daily(self._at(9)))
+
+        save.assert_not_called()
+
+    def test_restarting_does_not_resend_todays_list(self):
+        """메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다."""
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "load_last_run", return_value="2026-08-03"),
+            patch.object(bot.ShortsBot, "_offer_today") as offer,
+        ):
+            self.assertFalse(self._bot("9").maybe_run_daily(self._at(11)))
+
+        offer.assert_not_called()
 
     def test_a_failed_offer_is_tried_again_later(self):
         """
@@ -532,6 +598,8 @@ class TestDailySchedule(unittest.TestCase):
         shorts = self._bot("9")
         with (
             patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "load_last_run", return_value=""),
+            patch.object(bot.daily, "save_last_run"),
             patch.object(shorts, "_offer_today", side_effect=[False, True]) as offer,
         ):
             self.assertFalse(shorts.maybe_run_daily(self._at(9)))
