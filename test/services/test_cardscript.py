@@ -218,11 +218,18 @@ class TestBounds(unittest.TestCase):
 
 class TestAssembly(unittest.TestCase):
     def setUp(self):
-        # 대본을 만들 때 본문을 읽어 온다. 여기서 보려는 것은 조립 결과이므로
-        # 남의 서버를 부르지 않게 막아 둔다. 본문 읽기 자체는 별도로 시험한다.
-        patcher = patch.object(cardscript.enrich, "fetch_body", return_value="")
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # 대본을 만들 때 본문을 읽고 저장소를 살펴보고 점수를 매긴다. 여기서
+        # 보려는 것은 조립 결과이므로 남의 서버를 부르지 않게 막아 둔다. 각각은
+        # 따로 시험한다.
+        for target, name, value in (
+            (cardscript.enrich, "fetch_body", ""),
+            (cardscript.repo, "fetch_signals", None),
+            (cardscript.repo, "maturity", None),
+            (cardscript.llm, "judge_project", {}),
+        ):
+            patcher = patch.object(target, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _build(self, count=4, item=None):
         entries = [
@@ -260,6 +267,81 @@ class TestAssembly(unittest.TestCase):
         """하루치 소재 중 하나가 카드가 안 됐다고 나머지까지 멈출 이유가 없다."""
         with patch.object(llm, "generate_card_script", return_value=[]):
             self.assertIsNone(cardscript.build_card_script(_item()))
+
+
+class TestScoreCard(unittest.TestCase):
+    """
+    마무리는 항상 점수판이다. 완성도는 저장소를 세서 넣고 나머지는 모델이 매긴다 —
+    완성도까지 모델에게 물으면 무엇을 보든 4점이 나온다.
+    """
+
+    def _build(self, judged=None, measured=(4, "테스트 있음"), cards=3):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": f"말 {i}"}
+            for i in range(cards)
+        ]
+        judged = {"entry": (5, "한 줄 설치")} if judged is None else judged
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value=judged),
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=measured),
+        ):
+            return cardscript.build_card_script(_item())
+
+    def test_the_deck_ends_with_the_scores(self):
+        script = self._build()
+        self.assertTrue(script.cards[-1].scores)
+        self.assertFalse(script.cards[-2].scores)
+
+    def test_maturity_is_measured_not_asked_for(self):
+        """모델에게 물으면 무엇을 보든 4점이 나온다."""
+        script = self._build(measured=(2, "테스트 없음"))
+        maturity = next(s for s in script.cards[-1].scores if s.label == "완성도")
+
+        self.assertEqual(maturity.value, 2)
+        self.assertEqual(maturity.reason, "테스트 없음")
+
+    def test_a_project_we_cannot_inspect_still_gets_the_other_scores(self):
+        """저장소가 아닌 소재도 있다. 완성도만 빼고 나머지는 그대로 낸다."""
+        script = self._build(
+            measured=None, judged={"entry": (5, "설치 없음"), "reach": (2, "SF 한정")}
+        )
+        labels = [score.label for score in script.cards[-1].scores]
+
+        self.assertNotIn("완성도", labels)
+        self.assertEqual(labels, ["진입장벽", "쓸 자리"])
+
+    def test_one_lonely_score_is_not_a_score_card(self):
+        """비교할 것이 없는 막대 하나는 판정이 아니라 장식이다."""
+        script = self._build(measured=None, judged={"entry": (5, "한 줄")})
+        self.assertFalse(script.cards[-1].scores)
+
+    def test_the_narration_reads_the_numbers_as_words(self):
+        """합성기는 숫자를 밋밋하게 읽는다."""
+        script = self._build(measured=(3, "CI 없음"), judged={"entry": (5, "한 줄")})
+        spoken = script.narrations[-1]
+
+        self.assertIn("삼점", spoken.replace(" ", ""))
+        self.assertIn("오점", spoken.replace(" ", ""))
+
+    def test_the_score_card_is_numbered_and_credited(self):
+        script = self._build()
+        last = script.cards[-1]
+
+        self.assertEqual(last.index_label, f"{len(script.cards):02d}")
+        self.assertIn("Hacker News", last.footer)
+
+    def test_the_source_line_moves_to_the_score_card(self):
+        """두 장에 겹쳐 나오면 마지막 두 장이 같은 줄로 끝난다."""
+        script = self._build()
+        self.assertTrue(script.cards[0].footer)
+        self.assertFalse(script.cards[-2].footer)
+
+    def test_cards_and_narrations_still_line_up(self):
+        script = self._build()
+        self.assertEqual(len(script.cards), len(script.narrations))
 
 
 class TestScriptStaysPaired(unittest.TestCase):

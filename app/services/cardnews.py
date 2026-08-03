@@ -26,6 +26,8 @@ TITLE_COLOR = "#111111"
 BODY_COLOR = "#333333"
 ACCENT_COLOR = "#2563EB"
 FOOTER_COLOR = "#8A8A8A"
+# 점수 막대의 빈 칸. 채운 칸만 그리면 몇 점 만점인지 알 수 없다.
+EMPTY_BAR_COLOR = "#E5E7EB"
 
 TITLE_FONT = "Pretendard-Bold.ttf"
 BODY_FONT = "Pretendard-Regular.ttf"
@@ -46,6 +48,32 @@ MIN_CARD_SECONDS = 0.5
 MAX_CARD_SECONDS = 60.0
 
 
+MIN_SCORE = 1
+MAX_SCORE = 5
+MAX_SCORES = 4
+MAX_SCORE_LABEL_LENGTH = 10
+MAX_SCORE_REASON_LENGTH = 28
+
+
+@dataclass(frozen=True)
+class Score:
+    """점수 한 칸. 막대 하나가 된다."""
+
+    label: str
+    value: int
+    reason: str = ""
+
+    def __post_init__(self):
+        object.__setattr__(self, "label", _clip(self.label, MAX_SCORE_LABEL_LENGTH))
+        object.__setattr__(self, "reason", _clip(self.reason, MAX_SCORE_REASON_LENGTH))
+        # 막대는 이 범위만큼 칸을 채운다. 범위를 넘는 값이 오면 칸 밖으로 나간다.
+        try:
+            value = int(self.value)
+        except (TypeError, ValueError):
+            value = MIN_SCORE
+        object.__setattr__(self, "value", max(MIN_SCORE, min(value, MAX_SCORE)))
+
+
 @dataclass
 class Card:
     """카드 한 장. 화면에 나올 글이 전부 여기에 있다."""
@@ -54,11 +82,14 @@ class Card:
     body: tuple[str, ...] = field(default_factory=tuple)
     footer: str = ""
     index_label: str = ""
+    # 점수가 있으면 글 대신 막대를 그린다. 마지막 장에만 쓴다.
+    scores: tuple[Score, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
         self.title = _clip(self.title, MAX_TITLE_LENGTH)
         self.footer = _clip(self.footer, MAX_FOOTER_LENGTH)
         self.index_label = _clip(self.index_label, 8)
+        self.scores = tuple(islice(self.scores, MAX_SCORES))
         # islice 로 앞에서 끊는다. 먼저 tuple 로 만들면 끝없는 이터러블 하나에
         # 상한이 걸리기도 전에 메모리를 태운다.
         self.body = tuple(
@@ -135,6 +166,53 @@ def fit_single_line(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) 
     return (text[:cut].rstrip(" ·-") + ellipsis) if cut else ellipsis
 
 
+def _draw_scores(draw, scores, side, cursor, text_width, height) -> int:
+    """
+    점수 막대를 그리고 다음 줄 위치를 돌려준다.
+
+    숫자만 적으면 서로 비교가 안 된다. 막대는 어느 칸이 낮은지 한눈에 보이고,
+    그게 이 카드가 있는 이유다.
+    """
+    label_font = _font(TITLE_FONT, int(height * 0.026))
+    reason_font = _font(BODY_FONT, int(height * 0.019))
+    value_font = _font(TITLE_FONT, int(height * 0.026))
+
+    label_width = int(text_width * 0.26)
+    bar_left = side + label_width
+    bar_width = int(text_width * 0.52)
+    cell = bar_width // MAX_SCORE
+    gap = max(2, int(cell * 0.12))
+    bar_height = int(height * 0.020)
+
+    for score in scores:
+        draw.text((side, cursor), score.label, font=label_font, fill=TITLE_COLOR)
+        for step in range(MAX_SCORE):
+            left = bar_left + step * cell
+            draw.rectangle(
+                (left, cursor, left + cell - gap, cursor + bar_height),
+                # 채우지 않은 칸도 그린다. 없으면 5점 만점인지 알 수 없다.
+                fill=ACCENT_COLOR if step < score.value else EMPTY_BAR_COLOR,
+            )
+        draw.text(
+            (bar_left + bar_width + int(text_width * 0.04), cursor),
+            str(score.value),
+            font=value_font,
+            fill=TITLE_COLOR,
+        )
+        cursor += bar_height + int(height * 0.012)
+        if score.reason:
+            draw.text(
+                (side, cursor),
+                fit_single_line(draw, score.reason, reason_font, text_width),
+                font=reason_font,
+                fill=FOOTER_COLOR,
+            )
+            cursor += int(height * 0.024)
+        cursor += int(height * 0.014)
+
+    return cursor
+
+
 def render_card(card: Card, size: tuple[int, int] = CANVAS_SIZE) -> Image.Image:
     """카드 한 장을 이미지로 그린다."""
     width, height = size
@@ -158,6 +236,10 @@ def render_card(card: Card, size: tuple[int, int] = CANVAS_SIZE) -> Image.Image:
             break
         draw.text((side, cursor), line, font=title_font, fill=TITLE_COLOR)
         cursor += title_leading
+
+    if card.scores:
+        cursor += int(height * 0.030)
+        cursor = _draw_scores(draw, card.scores, side, cursor, text_width, height)
 
     if card.body:
         cursor += int(height * 0.028)

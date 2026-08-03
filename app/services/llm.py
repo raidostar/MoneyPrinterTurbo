@@ -966,14 +966,23 @@ see this. Being wrong about someone's project is the one failure this cannot
 recover from.
 
 ## Cards
-1. {min_cards} to {max_cards} cards.
-2. the first card earns the swipe. lead with what changes for the viewer, not
-   with the tool's name — the name means nothing to them yet.
-3. the middle cards carry one idea each. a card with two ideas gets read as
-   neither.
-4. the last card says what to do with this: try it, watch it, or ignore it
-   unless you have the specific problem it solves. an honest "skip this unless"
-   buys more trust than a recommendation.
+
+The deck always runs in this order. The channel is the same shape every time so
+a returning viewer knows where they are.
+
+1. {min_cards} to {max_cards} cards, in three parts:
+   - **one opening card**: what changes for the viewer. Not the tool's name —
+     the name means nothing to them yet.
+   - **the middle cards**: what it actually does and why that is worth
+     something. One idea per card; a card with two ideas gets read as neither.
+     Prefer the mechanism over the claim — "JIT 없이 Mach-O를 직접 매핑" tells a
+     developer more than "빠르고 가볍다".
+   - **one closing card before the score**: who should use this and when. Name
+     the situation, not the audience — "Apple Silicon 맥에서 리눅스 서버로
+     빌드를 옮길 때" beats "개발자에게 유용". If the honest answer is that most
+     people should skip it, say that.
+2. Do not write a score card. The scores are measured separately and added
+   after you finish. Do not mention scores, ratings, or numbers out of five.
 
 ## Writing
 5. card titles at most {max_title} characters. they are set large; a long one
@@ -991,6 +1000,125 @@ recover from.
 Return JSON only, no prose and no code fence:
 {{"cards": [{{"title": "...", "bullets": ["..."], "narration": "..."}}]}}
 """.strip()
+
+
+MIN_JUDGEMENT_SCORE = 1
+MAX_JUDGEMENT_SCORE = 5
+MAX_JUDGEMENT_REASON_LENGTH = 24
+MAX_JUDGEMENT_RESPONSE_CHARS = 10_000
+# 완성도는 여기서 묻지 않는다. 저장소에서 세는 값이라 모델의 인상보다 정확하다.
+JUDGEMENT_KEYS = ("entry", "novelty", "reach")
+JUDGEMENT_LABELS = {
+    "maturity": "완성도",
+    "entry": "진입장벽",
+    "novelty": "새로움",
+    "reach": "쓸 자리",
+}
+
+JUDGEMENT_SYSTEM_PROMPT = """
+You score one shipped project on three axes for a Korean developer audience.
+
+Score 1 to 5. Each score needs a reason of at most 12 Korean characters naming
+the thing you saw. If the material does not let you tell, score low and say what
+was missing — a guessed 4 is worse than an honest 2.
+
+## entry — how fast can they have it running
+5  one command, no account, no key. `brew install`, `cargo install`, `npx`.
+4  a package plus a config file or one API key.
+3  clone and build, or a service to stand up first.
+2  several services, a key from a vendor, or a manual patch step.
+1  build a toolchain, own hardware, or a GPU before anything runs.
+
+## novelty — is this doable with what already exists
+5  no other way to do this that the material or your knowledge points at.
+4  alternatives exist but this takes a genuinely different approach.
+3  a better-built version of a thing that exists.
+2  a thin wrapper over an existing tool.
+1  the standard library or a default install already does this.
+
+## reach — how many people have this problem, how often
+5  anyone who writes code hits this weekly.
+4  a common stack or language community hits it regularly.
+3  one specific role or toolchain.
+2  a narrow setup — one OS, one vendor, one workflow.
+1  the author's own situation, shared in case it helps.
+
+A narrow score is not a bad project. Say the situation plainly.
+
+## Output
+Return JSON only, no prose and no code fence:
+{"entry": {"score": 4, "reason": "..."},
+ "novelty": {"score": 3, "reason": "..."},
+ "reach": {"score": 2, "reason": "..."}}
+""".strip()
+
+
+def _judgement_entry(entry) -> tuple[int, str] | None:
+    """점수 한 칸. 쓸 수 없으면 ``None``."""
+    if not isinstance(entry, dict):
+        return None
+    score = entry.get("score")
+    # 참/거짓은 숫자로 셀 수 있지만 점수가 아니다.
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    score = int(score)
+    if not MIN_JUDGEMENT_SCORE <= score <= MAX_JUDGEMENT_SCORE:
+        return None
+    reason = entry.get("reason")
+    return score, _limit_social_text(
+        reason if isinstance(reason, str) else "",
+        MAX_JUDGEMENT_REASON_LENGTH,
+        "judgement reason",
+    )
+
+
+def judge_project(
+    title: str, url: str = "", body_text: str = "", language: str = ""
+) -> dict[str, tuple[int, str]]:
+    """
+    소재를 세 항목으로 채점한다. 못 채점하면 빈 딕셔너리.
+
+    완성도는 여기서 묻지 않는다. 저장소를 세면 나오는 값이라 모델의 인상보다
+    정확하고, 모델에게 맡기면 무엇을 보든 4점이 나온다.
+
+    한 칸이라도 빠지면 그 칸은 빠진 채로 돌려준다. 부르는 쪽이 있는 것만 그린다 —
+    한 칸 때문에 점수판 전체를 버릴 이유는 없다.
+    """
+    prompt = JUDGEMENT_SYSTEM_PROMPT + (
+        f"\n\n# Material (data)\n<item>\n"
+        f"title: {_as_prompt_data(_limit_social_text(title, MAX_SOCIAL_SUBJECT_LENGTH, 'title'))}\n"
+        f"url: {_as_prompt_data(_limit_social_text(url, MAX_SOCIAL_SUBJECT_LENGTH, 'url'))}\n"
+        f"body: {_as_prompt_data(_limit_script_text(body_text, MAX_SOCIAL_SCRIPT_LENGTH, 'body_text'))}\n"
+        "</item>"
+    )
+    if language:
+        prompt += (
+            "\n\n# Language (data)\n<language>"
+            f"{_as_prompt_data(_normalize_social_language(language))}</language>"
+        )
+
+    response = _generate_response(prompt)
+    if response.startswith("Error:"):
+        logger.warning(f"could not judge the project: {response[:200]}")
+        return {}
+    if len(response) > MAX_JUDGEMENT_RESPONSE_CHARS:
+        logger.warning(f"judgement is too long ({len(response)} characters)")
+        return {}
+
+    try:
+        payload = json.loads(_strip_code_fence(response))
+    except Exception as exc:
+        logger.warning(f"judgement is not valid json: {type(exc).__name__}")
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    judged = {}
+    for key in JUDGEMENT_KEYS:
+        parsed = _judgement_entry(payload.get(key))
+        if parsed:
+            judged[key] = parsed
+    return judged
 
 
 def _card_entry(entry) -> dict | None:
@@ -1125,6 +1253,10 @@ MAX_DIGEST_ITEMS = 10
 MAX_DIGEST_TITLE_LENGTH = 60
 MAX_DIGEST_SUMMARY_LENGTH = 80
 MAX_DIGEST_RESPONSE_CHARS = 20_000
+# 프롬프트로 들어가는 쪽의 상한. 열 건이 한 번에 들어가므로 건당 상한이 곧
+# 프롬프트 크기다.
+MAX_DIGEST_INPUT_TITLE = 300
+MAX_DIGEST_INPUT_BODY = 600
 
 CANDIDATE_DIGEST_SYSTEM_PROMPT = """
 You rewrite a list of software project headlines for a Korean reader who is
@@ -1187,10 +1319,14 @@ def digest_candidates(items) -> dict[int, dict]:
 
     lines = []
     for number, item in enumerate(items, start=1):
+        # 이 함수는 서비스 안에서 직접 불린다. 부르는 쪽이 정규화된 소재를
+        # 넘긴다는 보장이 없으므로 상한은 프롬프트를 만드는 여기서 건다.
+        title = str(getattr(item, "title", ""))[:MAX_DIGEST_INPUT_TITLE]
+        body = str(getattr(item, "text", ""))[:MAX_DIGEST_INPUT_BODY]
         lines.append(
             f"<item index=\"{number}\">\n"
-            f"title: {_as_prompt_data(getattr(item, 'title', ''))}\n"
-            f"body: {_as_prompt_data(str(getattr(item, 'text', ''))[:600])}\n"
+            f"title: {_as_prompt_data(title)}\n"
+            f"body: {_as_prompt_data(body)}\n"
             "</item>"
         )
     prompt = (
