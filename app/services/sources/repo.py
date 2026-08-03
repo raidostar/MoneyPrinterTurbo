@@ -66,8 +66,10 @@ class RepoSignals:
     description: str = ""
     open_issues: int = 0
     archived: bool = False
-    age_days: int = 0
-    idle_days: int = 0
+    # 모르는 것과 0 일은 다르다. 시각이 빠진 응답을 0 으로 두면 "오늘 손댔음" 이
+    # 되어, 가장 활발한 저장소로 오해된다.
+    age_days: int | None = None
+    idle_days: int | None = None
     has_tests: bool = False
     has_ci: bool = False
     has_docs: bool = False
@@ -85,22 +87,57 @@ class RepoSignals:
         return f"{self.owner}/{self.name}" if self.owner else ""
 
 
-def _days_since(stamp: str) -> int:
-    """ISO 시각에서 지금까지의 일수. 읽을 수 없으면 ``0``."""
+def _days_since(stamp) -> int | None:
+    """
+    ISO 시각에서 지금까지의 일수. 읽을 수 없으면 ``None``.
+
+    0 을 돌려주면 시각이 빠진 응답이 "오늘 손댔음" 이 된다. 모르는 것과 방금
+    한 것은 반대쪽 끝이라, 같은 값으로 두면 가장 활발한 저장소로 오해된다.
+    """
+    if not isinstance(stamp, str):
+        return None
     try:
-        moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return 0
+        moment = datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return max(0, (datetime.now(timezone.utc) - moment).days)
 
 
 def _count(value) -> int:
+    # 참/거짓은 숫자로 셀 수 있지만 개수가 아니다. True 가 1 이 되면 안 된다.
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _text(value, limit: int = 100) -> str:
+    """응답의 문자열 칸. 문자열이 아니면 없는 것으로 본다."""
+    if not isinstance(value, str):
+        return ""
+    text = "".join(char for char in value if char.isprintable())
+    return " ".join(text.split())[:limit]
+
+
+def _has_workflows(owner: str, repo: str) -> bool:
+    """
+    `.github/workflows` 에 실제로 파일이 있는지.
+
+    폴더만 있고 안이 비어 있을 수 있다. 그건 CI 가 도는 것이 아니다. 응답이
+    목록인지도 본다 — 오류 객체도 참이라, 그냥 두면 실패가 "CI 있음" 이 된다.
+    """
+    body = enrich.get_json(
+        WORKFLOWS_API.format(owner=owner, repo=repo),
+        accept=GITHUB_ACCEPT,
+        limit=MAX_TREE_BYTES,
+    )
+    if not isinstance(body, list):
+        return False
+    return any(isinstance(entry, dict) and entry.get("name") for entry in body)
 
 
 def _read_tree(owner: str, repo: str) -> dict:
@@ -125,19 +162,14 @@ def _read_tree(owner: str, repo: str) -> dict:
     for entry in entries[:MAX_TREE_ENTRIES]:
         if not isinstance(entry, dict):
             continue
-        name = str(entry.get("path", ""))
-        if not name:
+        name = _text(entry.get("path", ""), limit=200)
+        kind = entry.get("type")
+        # `commit` 은 서브모듈이다. 파일도 폴더도 아니라, 어느 쪽에 넣어도 틀린다.
+        if not name or kind not in {"tree", "blob"}:
             continue
-        (directories if entry.get("type") == "tree" else files).append(name)
+        (directories if kind == "tree" else files).append(name)
 
-    has_ci = ".github" in directories and bool(
-        # 폴더만 있고 안이 비어 있을 수 있다. 그건 CI 가 도는 것이 아니다.
-        enrich.get_json(
-            WORKFLOWS_API.format(owner=owner, repo=repo),
-            accept=GITHUB_ACCEPT,
-            limit=MAX_TREE_BYTES,
-        )
-    )
+    has_ci = ".github" in directories and _has_workflows(owner, repo)
 
     return {
         "has_tests": any(TEST_DIR.match(name) for name in directories)
@@ -170,7 +202,7 @@ def fetch_signals(url: str) -> RepoSignals:
     license_info = body.get("license")
     license_name = ""
     if isinstance(license_info, dict):
-        spdx = str(license_info.get("spdx_id", "") or "")
+        spdx = _text(license_info.get("spdx_id"), limit=40)
         # NOASSERTION 은 라이선스 파일은 있는데 무엇인지 알아보지 못한 경우다.
         # 정해진 라이선스가 붙은 것과 같이 볼 수 없다.
         license_name = "" if spdx in {"NOASSERTION", "NONE"} else spdx
@@ -179,13 +211,15 @@ def fetch_signals(url: str) -> RepoSignals:
         owner=owner,
         name=repo,
         stars=_count(body.get("stargazers_count")),
-        language=str(body.get("language") or ""),
+        language=_text(body.get("language"), limit=40),
         license_name=license_name,
-        description=str(body.get("description") or "")[:300],
+        description=_text(body.get("description"), limit=300),
         open_issues=_count(body.get("open_issues_count")),
-        archived=bool(body.get("archived")),
-        age_days=_days_since(body.get("created_at", "")),
-        idle_days=_days_since(body.get("pushed_at", "")),
+        # 참/거짓으로 오기로 되어 있다. 문자열 "false" 를 그대로 믿으면 비어 있지
+        # 않다는 이유로 보관된 저장소가 된다.
+        archived=body.get("archived") is True,
+        age_days=_days_since(body.get("created_at")),
+        idle_days=_days_since(body.get("pushed_at")),
         seen=True,
         **_read_tree(owner, repo),
     )
@@ -231,16 +265,19 @@ def maturity(signals: RepoSignals) -> tuple[int, str] | None:
         # 라이선스가 없으면 갖다 쓸 수 없다. 코드가 아무리 좋아도 그렇다.
         limits.append("라이선스 불명")
 
-    # 한 달 넘게 손을 안 댔으면 지금 상태가 마지막 상태다.
+    # 한 달 넘게 손을 안 댔으면 지금 상태가 마지막 상태다. 언제 손댔는지 모르면
+    # 점을 주지 않는다 — 모르는 것을 방금 한 것으로 세면 안 된다.
     if signals.archived:
         limits.append("보관됨")
+    elif signals.idle_days is None:
+        limits.append("최근 활동 확인 못 함")
     elif signals.idle_days <= 30:
         score += 1
     else:
         limits.append(f"{signals.idle_days}일째 조용")
 
     # 만든 지 얼마 안 됐으면 위의 신호가 다 있어도 아직 검증된 물건은 아니다.
-    if signals.age_days < 30:
+    if signals.age_days is not None and signals.age_days < 30:
         score = min(score, MAX_SCORE - 1)
         limits.append(f"{max(1, signals.age_days // 7)}주차")
 
@@ -255,7 +292,11 @@ def summary_line(signals: RepoSignals) -> str:
     parts = [f"★{signals.stars}"]
     if signals.language:
         parts.append(signals.language)
-    if signals.idle_days <= 1:
+    # 언제 손댔는지 모르면 아무 말도 하지 않는다. 모르는 것을 "어제도 커밋" 으로
+    # 적으면 가장 활발한 저장소처럼 보인다.
+    if signals.idle_days is None:
+        pass
+    elif signals.idle_days <= 1:
         parts.append("어제도 커밋")
     elif signals.idle_days <= 30:
         parts.append(f"{signals.idle_days}일 전 커밋")

@@ -26,14 +26,16 @@ ROOT_TREE = {
     ]
 }
 WORKFLOWS = [{"name": "ci.yml"}]
+# None 도 시험 대상이라, "안 넘겼음" 을 따로 표시한다.
+DEFAULT = object()
 
 
-def _signals(repo_body=None, tree=None, workflows=None, url="https://github.com/someone/thing"):
+def _signals(repo_body=DEFAULT, tree=DEFAULT, workflows=DEFAULT, url="https://github.com/someone/thing"):
     # 저장소 주소가 다른 주소들의 앞부분이라, 구체적인 것부터 본다.
     bodies = [
-        ("/contents/.github/workflows", WORKFLOWS if workflows is None else workflows),
-        ("/git/trees/", ROOT_TREE if tree is None else tree),
-        ("/repos/someone/thing", REPO_BODY if repo_body is None else repo_body),
+        ("/contents/.github/workflows", WORKFLOWS if workflows is DEFAULT else workflows),
+        ("/git/trees/", ROOT_TREE if tree is DEFAULT else tree),
+        ("/repos/someone/thing", REPO_BODY if repo_body is DEFAULT else repo_body),
     ]
 
     def fake(target, **_kwargs):
@@ -123,10 +125,63 @@ class TestReading(unittest.TestCase):
         self.assertEqual(signals.stars, 0)
         self.assertEqual(signals.open_issues, 0)
 
-    def test_a_timestamp_we_cannot_read_does_not_become_an_age(self):
-        body = dict(REPO_BODY, created_at="언젠가", pushed_at=None)
+    def test_a_timestamp_we_cannot_read_stays_unknown(self):
+        """
+        0 으로 두면 시각이 빠진 응답이 "오늘 손댔음" 이 된다. 모르는 것과 방금 한
+        것은 반대쪽 끝이라, 같은 값이면 가장 활발한 저장소로 오해된다.
+        """
+        for stamp in ("언젠가", None, 12345, ""):
+            with self.subTest(stamp=stamp):
+                body = dict(REPO_BODY, created_at=stamp, pushed_at=stamp)
+                signals, _ = _signals(repo_body=body)
+                self.assertIsNone(signals.age_days)
+                self.assertIsNone(signals.idle_days)
+
+    def test_a_field_that_is_not_a_string_does_not_become_one(self):
+        """이 값들은 화면과 프롬프트로 간다."""
+        body = dict(
+            REPO_BODY, language={"name": "Rust"}, description=["a", "b"],
+            license={"spdx_id": 42},
+        )
         signals, _ = _signals(repo_body=body)
-        self.assertEqual(signals.age_days, 0)
+        self.assertEqual(signals.language, "")
+        self.assertEqual(signals.description, "")
+        self.assertEqual(signals.license_name, "")
+
+    def test_long_or_hostile_text_is_cut(self):
+        body = dict(REPO_BODY, description="a\x1b[2Jb " + "설" * 5000, language="x" * 500)
+        signals, _ = _signals(repo_body=body)
+        self.assertNotIn("\x1b", signals.description)
+        self.assertLessEqual(len(signals.description), 300)
+        self.assertLessEqual(len(signals.language), 40)
+
+    def test_archived_must_be_said_with_a_boolean(self):
+        """문자열 "false" 를 믿으면 살아 있는 저장소가 보관된 것이 된다."""
+        for value in ("false", "no", 0, None, "true"):
+            with self.subTest(archived=value):
+                signals, _ = _signals(repo_body=dict(REPO_BODY, archived=value))
+                self.assertFalse(signals.archived)
+
+    def test_a_star_count_that_is_a_flag_is_not_a_count(self):
+        signals, _ = _signals(repo_body=dict(REPO_BODY, stargazers_count=True))
+        self.assertEqual(signals.stars, 0)
+
+    def test_a_submodule_is_neither_a_file_nor_a_folder(self):
+        """`commit` 항목을 어느 쪽에 넣어도 틀린다."""
+        tree = {"tree": [
+            {"path": "test_thing.py", "type": "commit"},
+            {"path": "Cargo.toml", "type": "commit"},
+        ]}
+        signals, _ = _signals(tree=tree)
+        self.assertFalse(signals.has_tests)
+        self.assertFalse(signals.is_packaged)
+
+    def test_an_error_object_from_the_workflow_listing_is_not_ci(self):
+        """목록이 아니면 CI 가 아니다. 오류 객체도 참이라 그냥 두면 통과한다."""
+        for body in ({"message": "Not Found"}, [{}], ["ci.yml"], None):
+            with self.subTest(body=body):
+                signals, _ = _signals(workflows=body)
+                self.assertFalse(signals.has_ci)
 
 
 class TestMaturity(unittest.TestCase):
@@ -180,6 +235,17 @@ class TestMaturity(unittest.TestCase):
     def test_an_archived_repository_is_not_counted_as_alive(self):
         self.assertLess(self._score(archived=True, idle_days=1)[0], self._score()[0])
 
+    def test_an_unknown_last_commit_does_not_earn_the_activity_point(self):
+        """모르는 것을 방금 한 것으로 세면, 시각이 빠진 응답이 만점을 받는다."""
+        known = self._score(idle_days=1)
+        unknown = self._score(idle_days=None)
+
+        self.assertLess(unknown[0], known[0])
+        self.assertIn("확인 못 함", unknown[1])
+
+    def test_an_unknown_age_does_not_crash_the_score(self):
+        self.assertIsNotNone(self._score(age_days=None))
+
     def test_a_listing_we_could_not_read_is_not_scored(self):
         """
         읽기에 실패한 저장소와 정말 테스트가 없는 저장소가 같은 점수를 받으면,
@@ -220,6 +286,11 @@ class TestSummaryLine(unittest.TestCase):
 
     def test_nothing_is_said_about_a_repository_we_did_not_see(self):
         self.assertEqual(repo.summary_line(repo.RepoSignals()), "")
+
+    def test_an_unknown_last_commit_is_not_reported_as_fresh(self):
+        """모르는 것을 "어제도 커밋" 으로 적으면 가장 활발한 저장소처럼 보인다."""
+        line = repo.summary_line(repo.RepoSignals(seen=True, stars=5, idle_days=None))
+        self.assertNotIn("커밋", line)
 
 
 if __name__ == "__main__":
