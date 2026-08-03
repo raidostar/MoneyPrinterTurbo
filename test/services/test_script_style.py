@@ -337,3 +337,57 @@ class TestEffectiveStyleIsRecorded(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProductStyle(unittest.TestCase):
+    """
+    경험담 스타일은 재미있는 사건은 잘 쓰지만 물건을 다루지 않는다. 미숫가루로
+    시켜도 미숫가루 이야기가 아니라 엘리베이터 사건이 나온다.
+    """
+
+    def _prompt(self):
+        return llm.script_style_prompt("product")
+
+    def test_the_style_is_registered(self):
+        self.assertIn("product", llm.SCRIPT_STYLE_PROMPTS)
+        self.assertEqual(llm.resolve_script_style("product"), "product")
+
+    def test_the_prompt_puts_the_product_at_the_centre(self):
+        """무엇을 쓰는 이야기인지가 빠지면 그냥 경험담이 된다."""
+        prompt = self._prompt()
+        for beat in ("Hook", "problem", "What changed", "How to decide"):
+            self.assertIn(beat, prompt)
+
+    def test_the_prompt_refuses_to_invent_claims_about_the_product(self):
+        """
+        효능이나 가격을 지어내면 되돌릴 수 없다. 산 사람이 알게 되는 순간,
+        안 본 사람보다 나쁜 결과가 된다.
+        """
+        prompt = self._prompt()
+        self.assertIn("Never invent", prompt)
+        for forbidden in ("효능", "가격", "할인율", "연구"):
+            self.assertIn(forbidden, prompt)
+
+    def test_the_prompt_keeps_the_person_and_refuses_the_sales_voice(self):
+        """매끈한 판매 멘트는 사람이 말하는 투보다 성과가 낮다."""
+        prompt = self._prompt()
+        self.assertIn("~했음", prompt)
+        for banned in ("대박", "인생템", "강추"):
+            self.assertIn(banned, prompt)
+
+    def test_the_prompt_asks_for_the_downside(self):
+        """단점 한 줄이 칭찬 세 줄보다 믿음을 산다."""
+        self.assertIn("admit the annoying part", self._prompt())
+
+    def test_the_prompt_does_not_ask_for_a_link(self):
+        """지금 구매 링크가 없다. 없는 곳을 가리키면 그 자리가 통째로 버려진다."""
+        prompt = self._prompt()
+        self.assertIn("구매하세요", prompt)
+        self.assertIn("Never", prompt.split("How to decide")[1][:400])
+
+    def test_the_style_does_not_replace_the_story_style(self):
+        """경험담도 계속 만들 수 있어야 한다."""
+        self.assertIn("story", llm.SCRIPT_STYLE_PROMPTS)
+        self.assertNotEqual(
+            llm.script_style_prompt("story"), llm.script_style_prompt("product")
+        )

@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import config
 
+# 나레이션 배속. 합성 음성은 등속으로 읽어서 실제 속도보다 느리게 들리고, 쇼츠는
+# 한 박자만 늘어져도 넘긴다. 화면에서 고르지 않은 작업은 전부 이 값으로 나간다.
+DEFAULT_VOICE_RATE = 1.3
+
 # Pydantic 의 특정 경고를 무시한다
 warnings.filterwarnings(
     "ignore",
@@ -100,7 +104,7 @@ class VideoParams(BaseModel):
 
     voice_name: Optional[str] = ""
     voice_volume: Optional[float] = 1.0
-    voice_rate: Optional[float] = 1.0
+    voice_rate: Optional[float] = DEFAULT_VOICE_RATE
     bgm_type: Optional[str] = "random"
     bgm_file: Optional[str] = ""
     bgm_volume: Optional[float] = 0.2

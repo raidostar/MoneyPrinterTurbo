@@ -1043,3 +1043,36 @@ if __name__ == "__main__":
     # python -m unittest test.services.test_voice.TestVoiceService.test_azure_tts_v1
     # python -m unittest test.services.test_voice.TestVoiceService.test_azure_tts_v2
     unittest.main() 
+
+
+class TestDefaultVoiceRate(unittest.TestCase):
+    """
+    합성 음성은 등속으로 읽어서 실제 속도보다 느리게 들린다. 쇼츠는 한 박자만
+    늘어져도 넘긴다.
+    """
+
+    def test_new_work_runs_faster_than_real_time(self):
+        from app.models.schema import DEFAULT_VOICE_RATE, VideoParams
+
+        self.assertGreater(DEFAULT_VOICE_RATE, 1.0)
+        self.assertEqual(VideoParams(video_subject="주제").voice_rate, DEFAULT_VOICE_RATE)
+
+    def test_the_speed_the_screen_offers_includes_the_default(self):
+        """
+        고를 수 없는 값을 기본값으로 두면 화면이 열릴 때 목록에 없는 값이라
+        멋대로 다른 값으로 바뀐다.
+        """
+        from app.models.schema import DEFAULT_VOICE_RATE
+
+        offered = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0]
+        self.assertIn(DEFAULT_VOICE_RATE, offered)
+
+    def test_the_bot_uses_the_same_default(self):
+        """봇으로 만든 영상만 느리면 채널 안에서 속도가 들쭉날쭉해진다."""
+        from unittest.mock import patch
+
+        from app.models.schema import DEFAULT_VOICE_RATE
+        from app.services import telegram_bot as bot
+
+        with patch.dict(bot.config.ui, {}, clear=True):
+            self.assertEqual(bot._build_params("주제", "대본").voice_rate, DEFAULT_VOICE_RATE)
