@@ -295,10 +295,14 @@ class TestNarrationRetry(unittest.TestCase):
             with open(target, "wb") as stale:
                 stale.write(b"old audio")
 
-            with patch.object(cardvideo.voice, "tts", return_value=object()):
+            with (
+                patch.object(cardvideo.voice, "tts", return_value=object()),
+                # 지난 파일이 남아 있으면 그 길이가 새 카드의 길이로 보고된다.
+                patch.object(cardvideo.voice, "get_audio_duration", return_value=9.0),
+            ):
                 seconds = cardvideo._narrate("말", target, _params())
 
-        self.assertEqual(seconds, 0.0)
+        self.assertEqual(seconds, 0.0, "예전 실행의 소리를 새 카드에 붙였다")
 
     def test_a_failed_synthesis_is_retried(self):
         """일시적인 실패 하나로 그 카드가 조용해지지 않게 한다."""
