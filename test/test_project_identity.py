@@ -109,13 +109,21 @@ class TestOperationalLinksPointHere(unittest.TestCase):
                 with self.subTest(line=line.strip()):
                     self.assertIn("raidostar/", line)
 
-    def test_the_bug_report_link_points_here(self):
-        """포크에서 난 문제를 원본 저장소에 신고하게 두면 안 된다."""
-        main = (ROOT / "webui/Main.py").read_text(encoding="utf-8")
-        for line in main.splitlines():
-            if "github.com" in line and "issues" in line:
-                with self.subTest(line=line.strip()):
-                    self.assertIn("raidostar/", line)
+    def test_releases_issues_and_pulls_point_here(self):
+        """
+        원본 릴리스로 안내하면 여기 수정이 빠진 빌드를 받게 되고, 여기서 난 문제를
+        원본에 신고하게 된다. 화면의 버그 신고 링크도 같은 문제다.
+        """
+        # 프로젝트 저장소의 운영 링크만 본다. `mpt-assets/releases/download/...`
+        # 같은 데모 이미지 주소는 코드도 신고 창구도 아니다.
+        owners = re.compile(
+            r"github\.com/([^/\s)\"']+)/MoneyPrinterTurbo/(?:releases|issues|pulls)"
+        )
+        for name in ("README.md", "README-en.md", "webui/Main.py"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for owner in owners.findall(text):
+                with self.subTest(file=name, owner=owner):
+                    self.assertEqual(owner, "raidostar")
 
 
 class TestCodeIsFetchedFromHere(unittest.TestCase):
@@ -146,22 +154,19 @@ class TestCodeIsFetchedFromHere(unittest.TestCase):
                     self.assertIn("raidostar/", url)
 
 
-class TestDocumentedPathsExist(unittest.TestCase):
-    def test_every_linked_repository_file_is_there(self):
+class TestTheRenamedNotebookIsReachable(unittest.TestCase):
+    def test_the_colab_badge_opens_the_notebook_that_exists(self):
         """
         이름을 바꾸다 보면 링크 속 파일명만 바뀌고 파일은 그대로 남는다. 그러면
-        안내된 진입점이 404 가 된다.
+        안내된 한 번 클릭 설치가 404 가 된다.
         """
-        import re
+        text = (ROOT / "README-en.md").read_text(encoding="utf-8")
+        self.assertIn("docs/shipcast.ipynb", text)
+        self.assertTrue((ROOT / "docs/shipcast.ipynb").exists())
 
-        pattern = re.compile(r"blob/main/([A-Za-z0-9_./-]+)")
-        for name in ("README.md", "README-en.md"):
-            text = (ROOT / name).read_text(encoding="utf-8")
-            for relative in pattern.findall(text):
-                with self.subTest(readme=name, path=relative):
-                    self.assertTrue(
-                        (ROOT / relative).exists(), f"{relative} 가 없다"
-                    )
+        for relative in re.findall(r"blob/main/([A-Za-z0-9_./-]+)", text):
+            with self.subTest(path=relative):
+                self.assertTrue((ROOT / relative).exists(), f"{relative} 가 없다")
 
 
 if __name__ == "__main__":

@@ -254,7 +254,7 @@ Want to try shipcast without setting up a local environment? Run it directly in 
 
 Download the latest Windows one-click package from GitHub Releases, then extract it directly.
 
-- GitHub Release: https://github.com/harry0703/MoneyPrinterTurbo/releases/latest
+- GitHub Release: https://github.com/raidostar/MoneyPrinterTurbo/releases/latest
 
 After downloading, it is recommended to **double-click** `update.bat` first to update to the **latest code**, then double-click `start.bat` to launch
 
@@ -527,7 +527,7 @@ Solution: [See how to download the model manually from Hugging Face](#subtitle-g
 
 ## Feedback & Suggestions 📢
 
-- You can submit an [issue](https://github.com/harry0703/MoneyPrinterTurbo/issues) or a [pull request](https://github.com/harry0703/MoneyPrinterTurbo/pulls).
+- You can submit an [issue](https://github.com/raidostar/MoneyPrinterTurbo/issues) or a [pull request](https://github.com/raidostar/MoneyPrinterTurbo/pulls).
 
 ## License 📝
 
