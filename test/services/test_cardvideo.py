@@ -3,11 +3,11 @@
 import os
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from unittest.mock import MagicMock, patch
 
 from app.models.schema import VideoParams
-from app.services import cardvideo
+from app.services import cardnews, cardvideo
 from app.services.cardnews import Card
 from app.services.cardscript import CardScript
 
@@ -25,8 +25,14 @@ def _silent_moviepy(clip_duration=7.0):
     moviepy 는 함수 안에서 import 된다. 모듈 속성이 아니라 moviepy 쪽을 갈아야
     실제 인코딩 없이 조립 흐름만 확인할 수 있다.
     """
+    # 모의 클립도 길이가 있어야 한다. 오디오를 카드 길이에 맞춰 자르거나 늘릴 때
+    # 실제로 비교하기 때문이다.
+    audio = MagicMock()
+    audio.return_value.duration = 2.0
+    # ExitStack 은 __enter__ 가 돌려주는 것을 쓴다. 같은 객체를 돌려줘야 길이가 보인다.
+    audio.return_value.__enter__.return_value = audio.return_value
     with (
-        patch("moviepy.AudioFileClip", MagicMock()),
+        patch.object(cardvideo, "AudioFileClip", audio),
         patch("moviepy.CompositeAudioClip", MagicMock()),
         patch("moviepy.concatenate_audioclips", MagicMock()),
         patch.object(cardvideo.cardnews, "build_card_news_clip") as build,
@@ -99,15 +105,98 @@ class TestTimelineStaysAligned(unittest.TestCase):
             patch.object(cardvideo, "_narrate", side_effect=lambda *a, **k: next(lengths)),
             patch.object(cardvideo, "_silence_clip") as silence,
             _silent_moviepy(7.5),
-            patch("moviepy.AudioFileClip") as audio,
+            patch.object(cardvideo, "AudioFileClip") as audio,
         ):
+            audio.return_value.duration = 2.0
+            audio.return_value.__enter__.return_value = audio.return_value
             with tempfile.TemporaryDirectory() as work:
                 cardvideo.render_card_news("t", _script(3), _params(), work)
 
         # 소리가 난 카드 둘은 파일에서, 실패한 하나는 무음으로. 합쳐서 셋이어야
         # 카드와 순서가 맞는다.
         self.assertEqual(audio.call_count, 2)
-        silence.assert_called_once_with(cardvideo.FALLBACK_CARD_SECONDS)
+        # 실패한 카드 자리에 그 길이만큼의 무음이 들어갔는지. (길이가 모자란 카드를
+        # 채우느라 무음이 더 불릴 수 있으므로 호출 횟수로 보지 않는다.)
+        asked = [call.args[0] for call in silence.call_args_list]
+        self.assertIn(cardvideo.FALLBACK_CARD_SECONDS, asked)
+
+    def test_a_narration_shorter_than_the_floor_still_lines_up(self):
+        """
+        영상 쪽은 카드 길이를 최소 0.5 초로 올린다. 오디오가 0.3 초 그대로면 그
+        차이만큼 다음 카드가 먼저 나오고, 이후 전부 밀린다.
+        """
+        with (
+            patch.object(cardvideo, "_narrate", return_value=0.3),
+            _silent_moviepy(1.5) as build,
+        ):
+            with tempfile.TemporaryDirectory() as work:
+                cardvideo.render_card_news("t", _script(3), _params(), work)
+
+        for seconds in build.call_args.args[1]:
+            self.assertGreaterEqual(seconds, cardnews.MIN_CARD_SECONDS)
+
+    def test_a_narration_longer_than_the_cap_is_brought_back(self):
+        """상한을 넘긴 나레이션은 영상 쪽에서 잘린다. 오디오도 같이 잘려야 한다."""
+        with (
+            patch.object(cardvideo, "_narrate", return_value=5_000.0),
+            _silent_moviepy(60.0) as build,
+        ):
+            with tempfile.TemporaryDirectory() as work:
+                cardvideo.render_card_news("t", _script(1), _params(), work)
+
+        self.assertEqual(build.call_args.args[1], [cardnews.MAX_CARD_SECONDS])
+
+    def test_the_render_resizes_each_segment_to_its_card(self):
+        """
+        조각을 맞추는 함수가 있어도 조립할 때 안 쓰면 소용이 없다. 나레이션 길이와
+        클립 길이가 다른 상황을 만들어 실제로 지나가는지 본다.
+        """
+        with (
+            patch.object(cardvideo, "_narrate", return_value=5.0),
+            patch.object(cardvideo, "_silence_clip") as silence,
+            _silent_moviepy(15.0),
+            patch("moviepy.concatenate_audioclips"),
+        ):
+            with tempfile.TemporaryDirectory() as work:
+                cardvideo.render_card_news("t", _script(3), _params(), work)
+
+        # 모의 클립은 2 초, 카드는 5 초. 매번 3 초씩 채워야 한다.
+        self.assertTrue(silence.called, "조각을 카드 길이에 맞추지 않았다")
+        self.assertAlmostEqual(silence.call_args.args[0], 3.0)
+
+    def test_a_short_narration_is_padded_to_the_card_length(self):
+        """
+        오디오 조각 하나가 카드보다 짧으면 그 차이만큼 뒤가 당겨진다. 조각의
+        길이를 카드에 맞춰야 두 타임라인이 같은 길이로 간다.
+        """
+        source = MagicMock()
+        source.duration = 1.0
+        source.__enter__ = MagicMock(return_value=source)
+        source.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(cardvideo, "AudioFileClip", return_value=source),
+            patch.object(cardvideo, "_silence_clip") as silence,
+            patch("moviepy.concatenate_audioclips") as concat,
+        ):
+            with ExitStack() as clips:
+                cardvideo._audio_segment(clips, "card.mp3", 3.0)
+
+        self.assertAlmostEqual(silence.call_args.args[0], 2.0)
+        concat.assert_called_once()
+
+    def test_a_long_narration_is_trimmed_to_the_card_length(self):
+        """길면 카드가 넘어간 뒤에도 소리가 남아 다음 카드를 덮는다."""
+        source = MagicMock()
+        source.duration = 9.0
+        source.__enter__ = MagicMock(return_value=source)
+        source.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(cardvideo, "AudioFileClip", return_value=source):
+            with ExitStack() as clips:
+                cardvideo._audio_segment(clips, "card.mp3", 4.0)
+
+        source.subclipped.assert_called_once_with(0, 4.0)
 
     def test_padding_does_not_depend_on_an_external_tool(self):
         """
@@ -132,6 +221,7 @@ class TestTimelineStaysAligned(unittest.TestCase):
 
         def make_clip(*_args, **_kwargs):
             clip = MagicMock()
+            clip.duration = 2.0
             clip.__enter__ = MagicMock(return_value=clip)
             clip.__exit__ = MagicMock(return_value=False)
             opened.append(clip)
@@ -140,7 +230,7 @@ class TestTimelineStaysAligned(unittest.TestCase):
         with (
             patch.object(cardvideo, "_narrate", return_value=2.0),
             _silent_moviepy(6.0),
-            patch("moviepy.AudioFileClip", side_effect=make_clip),
+            patch.object(cardvideo, "AudioFileClip", side_effect=make_clip),
         ):
             with tempfile.TemporaryDirectory() as work:
                 cardvideo.render_card_news("t", _script(3), _params(), work)

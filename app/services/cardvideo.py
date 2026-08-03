@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 import numpy as np
+from moviepy import AudioFileClip
 
 from app.services import bgm as bgm_service
 from app.services import cardnews, llm, video as video_service, voice
@@ -44,6 +45,28 @@ def _silence_clip(seconds: float):
 
     frames = max(1, int(SILENCE_FPS * max(seconds, 0.1)))
     return AudioArrayClip(np.zeros((frames, 2)), fps=SILENCE_FPS)
+
+
+def _audio_segment(clips: ExitStack, path: str | None, seconds: float):
+    """
+    카드 하나가 차지할 오디오를 정확히 ``seconds`` 만큼 만든다.
+
+    영상 쪽은 카드 길이를 상·하한으로 조인다. 오디오가 원래 길이를 그대로 쓰면 그
+    차이만큼 뒤로 밀리고, 카드가 넘어갈수록 벌어진다. 짧으면 뒤에 무음을 붙이고
+    길면 잘라, 두 타임라인의 길이를 같게 만든다.
+    """
+    from moviepy import concatenate_audioclips
+
+    if path is None:
+        return clips.enter_context(_silence_clip(seconds))
+
+    source = clips.enter_context(AudioFileClip(path))
+    if source.duration > seconds:
+        return clips.enter_context(source.subclipped(0, seconds))
+    if source.duration < seconds:
+        tail = clips.enter_context(_silence_clip(seconds - source.duration))
+        return clips.enter_context(concatenate_audioclips([source, tail]))
+    return source
 
 
 def _narrate(text: str, target_path: str, params) -> float:
@@ -86,7 +109,7 @@ def render_card_news(
     ``params`` 는 기존 영상 파라미터를 그대로 쓴다. 음성, 배속, BGM 설정이 이미
     거기 있고, 카드뉴스라고 다른 값을 쓸 이유가 없다.
     """
-    from moviepy import AudioFileClip, CompositeAudioClip, afx, concatenate_audioclips
+    from moviepy import CompositeAudioClip, afx, concatenate_audioclips
 
     os.makedirs(output_dir, exist_ok=True)
     durations: list[float] = []
@@ -98,7 +121,7 @@ def render_card_news(
         seconds = _narrate(narration, target, params) if narration.strip() else 0.0
         if seconds > 0:
             narration_paths.append(target)
-            durations.append(seconds)
+            durations.append(cardnews.card_seconds(seconds))
             continue
 
         # 소리 없이 지나가는 카드. 오디오 쪽에도 같은 길이의 자리를 만들어야 한다.
@@ -106,7 +129,7 @@ def render_card_news(
         # 파일로 만들지 않고 메모리에서 만드는 이유는, 이 자리를 채우는 일이
         # 외부 도구의 성공 여부에 걸려서는 안 되기 때문이다.
         narration_paths.append(None)
-        durations.append(FALLBACK_CARD_SECONDS)
+        durations.append(cardnews.card_seconds(FALLBACK_CARD_SECONDS))
 
     if not durations:
         logger.error(f"card news has nothing to render: {task_id}")
@@ -122,10 +145,8 @@ def render_card_news(
         audio_clip = None
         if narration_paths:
             narration_clips = [
-                clips.enter_context(AudioFileClip(path))
-                if path
-                else clips.enter_context(_silence_clip(FALLBACK_CARD_SECONDS))
-                for path in narration_paths
+                _audio_segment(clips, path, seconds)
+                for path, seconds in zip(narration_paths, durations)
             ]
             audio_clip = clips.enter_context(
                 concatenate_audioclips(narration_clips).with_effects(
