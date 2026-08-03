@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -20,10 +21,18 @@ _CONFIG_BASE = {
 }
 
 
-def _mock_response(success=True):
+def _mock_response(success=True, body=None, status=200):
     r = MagicMock()
-    r.json.return_value = {"success": success, "request_id": "abc123"}
+    if body is None:
+        body = json.dumps({"success": success, "request_id": "abc123"}).encode("utf-8")
+    r.status_code = status
+    r.raw.read.return_value = body
     r.raise_for_status = MagicMock()
+    if status >= 400:
+        # 진짜 응답은 여기서 예외를 올린다. 올리게 두면 거절과 끊김이 같아진다.
+        r.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            f"{status} Error", response=r
+        )
     return r
 
 
@@ -40,6 +49,215 @@ def _get_all(data, key):
 
 def _has_key(data, key):
     return any(k == key for k, v in data)
+
+
+class TestChannelProfile(unittest.TestCase):
+    """
+    채널마다 올라가는 계정이 다르다. 프로필을 정해 보냈는데 설정에 적힌 기본
+    프로필로 나가면, 카드뉴스가 쇼츠 계정에 올라간다.
+    """
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_given_profile_replaces_the_configured_one(self, mock_post, _exists):
+        mock_post.return_value = _mock_response()
+        service = UploadPostService()
+
+        service.upload_video("/fake/v.mp4", "T")
+        without = _get(mock_post.call_args[1]["data"], "user")
+        service.upload_video("/fake/v.mp4", "T", username="cardnews")
+        given = _get(mock_post.call_args[1]["data"], "user")
+
+        self.assertEqual(without, "testuser")
+        self.assertEqual(given, "cardnews")
+
+    @patch(
+        "app.services.upload_post.config.app",
+        {**_CONFIG_BASE, "upload_post_username": ""},
+    )
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_channel_profile_works_without_a_configured_one(self, mock_post, _exists):
+        """기본 프로필을 비워 둔 채로 카드뉴스만 올리는 설정이 가능해야 한다."""
+        mock_post.return_value = _mock_response()
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T", username="cardnews")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "cardnews")
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_extra_fields_reach_the_request(self, mock_post, _exists):
+        """
+        AI 로 만들었다는 고지가 이 길로 나간다. 조용히 버려지면 밝히지 않은 채
+        올라간다.
+        """
+        mock_post.return_value = _mock_response()
+
+        UploadPostService().upload_video(
+            "/fake/v.mp4", "T", extra_fields={"is_aigc": "true"}
+        )
+
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "is_aigc"), "true")
+
+
+class TestResponseIsExternalInput(unittest.TestCase):
+    """
+    응답은 밖에서 온다. 이 함수는 실패를 예외가 아니라 반환값으로 알리기로 되어
+    있는데, 본문 파싱에서 나는 예외는 아래 `RequestException` 에 걸리지 않는다.
+    """
+
+    def _upload(self, body, status=200):
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            post.return_value = _mock_response(body=body, status=status)
+            return UploadPostService().upload_video("/fake/v.mp4", "T")
+
+    def test_a_success_flag_that_is_not_a_boolean_is_not_success(self):
+        """
+        `success` 는 참/거짓으로 오기로 되어 있다. 문자열 "false" 를 그대로 믿으면
+        비어 있지 않다는 이유로 성공이 된다.
+        """
+        for value in ('"false"', '"0"', "0", "null", '"yes"'):
+            with self.subTest(success=value):
+                result = self._upload(b'{"success": ' + value.encode() + b"}")
+                self.assertFalse(result["success"])
+
+    def test_a_refusal_can_be_sent_again(self):
+        """
+        제목이 길거나 키가 틀려서 거절당한 것은 안 올라간 것이다. 모르겠다고 하면
+        고쳐서 다시 보낼 수 있는 영상이 영영 막힌다.
+        """
+        for status in (400, 401, 403, 404, 429):
+            with self.subTest(status=status):
+                result = self._upload(b'{"error": "nope"}', status=status)
+                self.assertFalse(result["success"])
+                self.assertFalse(result.get("indeterminate"))
+
+    def test_a_server_error_says_it_does_not_know(self):
+        """5xx 는 저쪽이 받아 놓고 처리하다 넘어진 것일 수 있다."""
+        for status in (500, 502, 503):
+            with self.subTest(status=status):
+                result = self._upload(b'{"error": "oops"}', status=status)
+                self.assertTrue(result.get("indeterminate"))
+
+    def test_a_refusal_with_a_broken_body_can_still_be_sent_again(self):
+        result = self._upload(b"<html>400 Bad Request</html>", status=400)
+        self.assertFalse(result.get("indeterminate"))
+
+    def test_provider_text_is_cut_and_kept_printable(self):
+        """이 값들이 기록과 텔레그램 화면으로 그대로 간다."""
+        hostile = json.dumps(
+            {
+                "success": True,
+                "request_id": "a[2Jb" + "x" * 5000,
+                "message": "m" * 5000,
+            }
+        ).encode("utf-8")
+
+        result = self._upload(hostile)
+
+        for field in ("request_id", "message"):
+            self.assertNotIn("", result[field])
+            self.assertLessEqual(len(result[field]), 300)
+
+    def test_a_body_that_breaks_while_reading_does_not_escape(self):
+        """
+        압축이 도중에 끊기면 requests 가 아니라 urllib3 의 예외가 난다. 그건
+        `RequestException` 에 안 걸려, 영상을 보내는 자리에서 그대로 터진다.
+        """
+        import urllib3
+
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            response.raw.read.side_effect = urllib3.exceptions.DecodeError("broken")
+            post.return_value = response
+            result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertFalse(result["success"])
+        # 어디까지 갔는지 모르는 상태다.
+        self.assertTrue(result["indeterminate"])
+
+    def test_the_response_is_closed_after_reading(self):
+        """안 닫으면 응답이 쌓일수록 열린 소켓이 남는다."""
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            post.return_value = response
+            UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        response.__exit__.assert_called()
+
+    def test_a_hostile_error_message_is_sanitized(self):
+        leak = json.dumps(
+            {"error": "https://user:hunter2@upload.test/api?api_key=SECRET42"}
+        ).encode("utf-8")
+
+        result = self._upload(leak, status=400)
+
+        self.assertNotIn("hunter2", result["error"])
+        self.assertNotIn("SECRET42", result["error"])
+
+    def test_a_body_that_is_not_json_is_a_failure(self):
+        result = self._upload(b"<html>gateway timeout</html>")
+        self.assertFalse(result["success"])
+
+    def test_a_body_we_could_not_read_says_it_does_not_know(self):
+        """
+        요청은 이미 나갔고 응답만 못 읽은 것일 수 있다. 그냥 실패로 알리면 부르는
+        쪽이 다시 보내 같은 영상을 두 번 올린다.
+        """
+        for body in (b"<html>502</html>", b'["not", "an", "object"]'):
+            with self.subTest(body=body[:20]):
+                self.assertTrue(self._upload(body).get("indeterminate"))
+
+    def test_a_body_that_is_not_an_object_is_a_failure(self):
+        result = self._upload(b'["not", "an", "object"]')
+        self.assertFalse(result["success"])
+
+    def test_an_oversized_body_is_not_parsed(self):
+        """통째로 올려 파싱하면 거대한 본문 하나에 흔들린다."""
+        from app.services.upload_post import MAX_RESPONSE_BYTES
+
+        filler = b" " * (MAX_RESPONSE_BYTES + 10)
+        result = self._upload(b'{"success": true, "note": "' + filler + b'"}')
+        self.assertFalse(result["success"])
+
+    def test_the_body_is_read_up_to_a_limit(self):
+        from app.services.upload_post import MAX_RESPONSE_BYTES
+
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            post.return_value = response
+            UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        response.raw.read.assert_called_once_with(
+            MAX_RESPONSE_BYTES + 1, decode_content=True
+        )
 
 
 class TestUploadPostService(unittest.TestCase):
@@ -79,6 +297,37 @@ class TestUploadPostService(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn("upload timed out", result["error"])
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_network_error_is_sanitized_before_it_leaves(self, mock_post, _exists):
+        """예외 문구는 기록과 화면으로 그대로 흘러간다."""
+        mock_post.side_effect = requests.exceptions.ConnectionError(
+            "cannot reach https://user:hunter2@upload.test/api?api_key=SECRET42"
+        )
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertFalse(result["success"])
+        self.assertNotIn("hunter2", result["error"])
+        self.assertNotIn("SECRET42", result["error"])
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_send_that_was_cut_off_says_it_does_not_know(self, mock_post, _exists):
+        """
+        저쪽이 받고 나서 응답만 끊겼을 수 있다. 그냥 실패와 같은 값으로 알리면
+        부르는 쪽이 다시 보내 두 번 올린다.
+        """
+        mock_post.side_effect = requests.exceptions.Timeout("upload timed out")
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertTrue(result["indeterminate"])
 
     @patch("app.services.upload_post.config.app", _CONFIG_BASE)
     @patch("app.services.upload_post.requests.get")
