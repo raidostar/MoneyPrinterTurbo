@@ -1114,6 +1114,117 @@ def generate_card_script(
 
 
 # =============================================================================
+# 후보 목록 훑어보기
+#
+# 소재는 대부분 영어로 올라온다. 제목만 그대로 보내면 고르는 사람이 매번 링크를
+# 열어 봐야 하고, 그러면 목록을 보내는 의미가 없다. 한 번의 호출로 다섯 건을
+# 한꺼번에 옮긴다 — 건마다 부르면 후보 다섯 개에 다섯 번을 쓴다.
+# =============================================================================
+
+MAX_DIGEST_ITEMS = 10
+MAX_DIGEST_TITLE_LENGTH = 60
+MAX_DIGEST_SUMMARY_LENGTH = 80
+MAX_DIGEST_RESPONSE_CHARS = 20_000
+
+CANDIDATE_DIGEST_SYSTEM_PROMPT = """
+You rewrite a list of software project headlines for a Korean reader who is
+deciding which one to look at.
+
+For each item return:
+- "title": the project name kept as-is, then an em dash, then what it does in
+  Korean. Under 30 characters after the dash. Not a translation of the English
+  headline — say what the thing is.
+- "summary": one Korean line, under 40 characters, that says the one fact that
+  would make someone open it. A capability, a constraint, or what it replaces.
+
+Rules:
+- Use only what the given title and body say. Do not invent features, numbers,
+  company names, or who made it.
+- If the body is empty, write the summary from the title alone and keep it short
+  rather than padding it.
+- Plain Korean. No marketing words, no "혁신적인", no exclamation marks.
+- Keep English proper nouns and command names in English.
+
+Return JSON only:
+{"items": [{"index": 1, "title": "...", "summary": "..."}]}
+The index must match the number given with each item.
+""".strip()
+
+
+def _digest_entry(entry) -> tuple[int, dict] | None:
+    """훑어보기 한 건. 쓸 수 없으면 ``None``."""
+    if not isinstance(entry, dict):
+        return None
+    try:
+        index = int(entry.get("index"))
+    except (TypeError, ValueError):
+        return None
+    title = _limit_script_text(
+        entry.get("title") if isinstance(entry.get("title"), str) else "",
+        MAX_DIGEST_TITLE_LENGTH,
+        "digest_title",
+    )
+    if not title:
+        return None
+    summary = _limit_script_text(
+        entry.get("summary") if isinstance(entry.get("summary"), str) else "",
+        MAX_DIGEST_SUMMARY_LENGTH,
+        "digest_summary",
+    )
+    return index, {"title": title, "summary": summary}
+
+
+def digest_candidates(items) -> dict[int, dict]:
+    """
+    후보 목록을 한국어로 옮긴다. 번호 → ``{"title", "summary"}``.
+
+    못 옮긴 것은 빠진다. 부르는 쪽은 없는 번호를 원래 제목으로 채운다 — 목록을
+    아예 못 보내는 것보다 영어 제목이라도 보내는 편이 낫다.
+    """
+    items = list(items)[:MAX_DIGEST_ITEMS]
+    if not items:
+        return {}
+
+    lines = []
+    for number, item in enumerate(items, start=1):
+        lines.append(
+            f"<item index=\"{number}\">\n"
+            f"title: {_as_prompt_data(getattr(item, 'title', ''))}\n"
+            f"body: {_as_prompt_data(str(getattr(item, 'text', ''))[:600])}\n"
+            "</item>"
+        )
+    prompt = (
+        f"{CANDIDATE_DIGEST_SYSTEM_PROMPT}\n\n# Items (data)\n" + "\n".join(lines)
+    )
+
+    response = _generate_response(prompt)
+    if response.startswith("Error:"):
+        logger.warning(f"could not digest the candidates: {response[:200]}")
+        return {}
+    if len(response) > MAX_DIGEST_RESPONSE_CHARS:
+        logger.warning(f"candidate digest is too long ({len(response)} characters)")
+        return {}
+
+    try:
+        payload = json.loads(_strip_code_fence(response))
+    except Exception as exc:
+        logger.warning(f"candidate digest is not valid json: {type(exc).__name__}")
+        return {}
+
+    raw = payload.get("items") if isinstance(payload, dict) else payload
+    if not isinstance(raw, list):
+        logger.warning("candidate digest did not contain a list")
+        return {}
+
+    digested = {}
+    for entry in raw[:MAX_DIGEST_ITEMS]:
+        parsed = _digest_entry(entry)
+        if parsed and 1 <= parsed[0] <= len(items):
+            digested[parsed[0]] = parsed[1]
+    return digested
+
+
+# =============================================================================
 # Social publishing metadata
 #
 # 영상 주제와 대본을 바탕으로 숏폼 플랫폼에 올릴 때 흔히 쓰는 title, caption, hashtags 를 만든다.

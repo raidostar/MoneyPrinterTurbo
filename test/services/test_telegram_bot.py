@@ -366,6 +366,18 @@ class TestSecrets(unittest.TestCase):
 class TestDailyFlow(unittest.TestCase):
     """매일 후보를 보내고 고른 것만 만든다."""
 
+    def setUp(self):
+        # 후보를 보여 줄 때 소재를 한국어로 옮기고 저장소를 살펴본다. 여기서
+        # 보려는 것은 목록 자체라, 밖으로 나가지 않게 막아 둔다.
+        digest = patch.object(bot.llm, "digest_candidates", return_value={})
+        signals = patch.object(
+            bot.repo, "fetch_signals", return_value=bot.repo.RepoSignals()
+        )
+        digest.start()
+        signals.start()
+        self.addCleanup(digest.stop)
+        self.addCleanup(signals.stop)
+
     def _bot(self):
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
@@ -705,6 +717,91 @@ class TestDailySchedule(unittest.TestCase):
                 ):
                     self.assertFalse(shorts.maybe_run_daily(self._at(12)))
                 offer.assert_not_called()
+
+
+class TestCandidateList(unittest.TestCase):
+    """
+    소재는 대부분 영어로 올라온다. 제목만 그대로 보내면 고르는 사람이 매번 링크를
+    열어 봐야 하고, 그러면 목록을 보내는 의미가 없다.
+    """
+
+    def _offer(self, digest=None, signals=None, titles=("Show HN: A tiny thing",)):
+        from app.services.daily import DailyPick, DailyRun
+        from app.services.sources.base import SourceItem
+
+        run = DailyRun(
+            picks=tuple(
+                DailyPick(
+                    item=SourceItem(
+                        source="hackernews",
+                        item_id=str(index),
+                        title=title,
+                        url=f"https://github.com/someone/thing{index}",
+                    ),
+                    reason="117 points",
+                )
+                for index, title in enumerate(titles)
+            )
+        )
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.daily, "pick_items", return_value=run),
+            patch.object(bot.llm, "digest_candidates", return_value=digest or {}),
+            patch.object(
+                bot.repo,
+                "fetch_signals",
+                return_value=signals or bot.repo.RepoSignals(),
+            ),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._offer_today()
+        return " ".join(str(call.args[1]) for call in send.call_args_list)
+
+    def test_the_list_is_written_in_korean(self):
+        said = self._offer(
+            digest={1: {"title": "Kakehashi — Linux에서 macOS 실행", "summary": "JIT 없이 Mach-O 실행"}}
+        )
+        self.assertIn("Linux에서 macOS 실행", said)
+        self.assertIn("JIT 없이 Mach-O 실행", said)
+
+    def test_a_candidate_we_could_not_translate_still_shows_up(self):
+        """옮기지 못했다고 목록에서 빼면, 그 소재는 영영 안 보인다."""
+        said = self._offer(digest={}, titles=("Show HN: A tiny thing",))
+        self.assertIn("Show HN: A tiny thing", said)
+
+    def test_the_list_says_how_alive_the_project_is(self):
+        """별 수와 마지막 커밋은 열어 보지 않고 판단할 수 있는 값이다."""
+        said = self._offer(
+            signals=bot.repo.RepoSignals(
+                seen=True, stars=292, language="Rust", idle_days=0
+            )
+        )
+        self.assertIn("★292", said)
+        self.assertIn("Rust", said)
+
+    def test_translating_happens_once_for_the_whole_list(self):
+        """건마다 부르면 후보 다섯 개에 다섯 번을 쓴다."""
+        from app.services.daily import DailyPick, DailyRun
+        from app.services.sources.base import SourceItem
+
+        run = DailyRun(
+            picks=tuple(
+                DailyPick(item=SourceItem(source="hackernews", item_id=str(i), title=f"글 {i}"))
+                for i in range(5)
+            )
+        )
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.daily, "pick_items", return_value=run),
+            patch.object(bot.llm, "digest_candidates", return_value={}) as digest,
+            patch.object(bot.repo, "fetch_signals", return_value=bot.repo.RepoSignals()),
+            patch.object(bot, "_send"),
+        ):
+            shorts._offer_today()
+
+        digest.assert_called_once()
 
 
 class TestPublishing(unittest.TestCase):

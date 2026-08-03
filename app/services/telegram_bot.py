@@ -22,6 +22,7 @@ from loguru import logger
 from app.config import config
 from app.models.schema import VideoParams
 from app.services import cardscript, cardvideo, daily, llm, publish, task_artifacts
+from app.services.sources import repo
 from app.services import task as tm
 from app.utils import utils
 
@@ -293,13 +294,31 @@ class ShortsBot:
             _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
             return True
 
-        for index, pick in enumerate(run.picks, start=1):
+        # 소재는 대부분 영어로 올라온다. 제목만 그대로 보내면 고르는 사람이 매번
+        # 링크를 열어 봐야 하고, 그러면 목록을 보내는 의미가 없다.
+        items = [pick.item for pick in run.picks]
+        digest = llm.digest_candidates(items)
+        signals = [repo.fetch_signals(item.url) for item in items]
+
+        for index, (pick, marks) in enumerate(zip(run.picks, signals), start=1):
             token = uuid4().hex[:8]
             self.candidates[token] = pick.item
+            said = digest.get(index) or {}
+            # 옮기지 못했으면 원래 제목을 쓴다. 목록을 아예 못 보내는 것보다 낫다.
+            lines = [f"{index}. {said.get('title') or pick.item.title}"]
+            if said.get("summary"):
+                lines.append(said["summary"])
+            lines.append(
+                " · ".join(
+                    part
+                    for part in (repo.summary_line(marks), pick.reason)
+                    if part
+                )
+            )
+            lines.append(pick.item.url or pick.item.discussion_url)
             _send(
                 self.chat_id,
-                f"{index}. {pick.item.title}\n{pick.reason}\n"
-                f"{pick.item.url or pick.item.discussion_url}",
+                "\n".join(lines),
                 buttons=[[{"text": "이걸로", "callback_data": f"pick:{token}"}]],
             )
         return True
