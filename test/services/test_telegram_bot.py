@@ -1,7 +1,9 @@
 """텔레그램 봇."""
 
+import time
 import unittest
 import unittest.mock
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import telegram_bot as bot
@@ -359,6 +361,154 @@ class TestSecrets(unittest.TestCase):
         exception.assert_not_called()
         error.assert_called_once()
         self.assertNotIn("hunter2", error.call_args.args[0])
+
+
+class TestDailyFlow(unittest.TestCase):
+    """매일 후보를 보내고 고른 것만 만든다."""
+
+    def _bot(self):
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        return shorts
+
+    def test_today_offers_candidates_without_rendering(self):
+        """
+        고르기 전에 만들기 시작하면, 안 쓸 소재에 십 분을 쓴다.
+        """
+        from app.services.daily import DailyPick
+        from app.services.sources.base import SourceItem
+
+        picks = [
+            DailyPick(item=SourceItem(source="hackernews", item_id=str(i), title=f"글 {i}"), reason="100 points")
+            for i in range(3)
+        ]
+        shorts = self._bot()
+        with (
+            patch.object(bot.daily, "pick_items", return_value=picks),
+            patch.object(bot, "_send") as send,
+            patch.object(bot.cardscript, "build_card_script") as build,
+        ):
+            shorts.handle_update(_message(111, "/오늘"))
+
+        build.assert_not_called()
+        self.assertEqual(len(shorts.candidates), 3)
+        self.assertGreaterEqual(send.call_count, 3)
+
+    def test_picking_a_candidate_drafts_cards(self):
+        from app.services.sources.base import SourceItem
+
+        shorts = self._bot()
+        shorts.candidates = {"tok": SourceItem(source="hackernews", item_id="1", title="글")}
+        script = SimpleNamespace(
+            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            narrations=("말",),
+            narration_text="말",
+        )
+        with (
+            patch.object(bot.cardscript, "build_card_script", return_value=script),
+            patch.object(bot, "_send"),
+            patch.object(bot, "_answer_callback"),
+        ):
+            shorts.handle_update(_callback(111, "pick:tok"))
+
+        self.assertIs(shorts.pending["card_script"], script)
+
+    def test_a_button_from_a_previous_list_is_refused(self):
+        shorts = self._bot()
+        shorts.candidates = {}
+        with (
+            patch.object(bot.cardscript, "build_card_script") as build,
+            patch.object(bot, "_send"),
+            patch.object(bot, "_answer_callback"),
+        ):
+            shorts.handle_update(_callback(111, "pick:gone"))
+
+        build.assert_not_called()
+
+    def test_what_was_made_is_recorded_and_a_failure_is_not(self):
+        """
+        만든 소재는 내일 다시 나오면 안 되고, 만들다 실패한 소재는 다시 나와야
+        한다. 기록하지 않으면 같은 것을 계속 다시 만든다.
+        """
+        from app.services.sources.base import SourceItem
+
+        item = SourceItem(source="hackernews", item_id="1", title="글")
+        made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=5)
+
+        shorts = self._bot()
+        with (
+            patch.object(bot.cardvideo, "render_card_news", return_value=made),
+            patch.object(bot.daily, "mark_used") as mark,
+            patch.object(bot, "_send_video"),
+            patch.object(bot, "_send"),
+        ):
+            shorts._render_cards(item, object())
+        mark.assert_called_once_with(item)
+
+        shorts = self._bot()
+        with (
+            patch.object(bot.cardvideo, "render_card_news", return_value=None),
+            patch.object(bot.daily, "mark_used") as mark,
+            patch.object(bot, "_send"),
+        ):
+            shorts._render_cards(item, object())
+        mark.assert_not_called()
+
+
+class TestDailySchedule(unittest.TestCase):
+    def _bot(self, hour):
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        self._hour = hour
+        return shorts
+
+    def _at(self, hour):
+        return time.struct_time((2026, 8, 3, hour, 0, 0, 0, 215, 0))
+
+    def test_nothing_is_sent_before_the_hour(self):
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(shorts, "_offer_today") as offer,
+        ):
+            self.assertFalse(shorts.maybe_run_daily(self._at(8)))
+        offer.assert_not_called()
+
+    def test_it_only_fires_once_a_day(self):
+        """
+        시각만 보면 그 시간대 안에서 폴링이 도는 동안 계속 보낸다. 몇 분마다
+        같은 목록이 오게 된다.
+        """
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(shorts, "_offer_today") as offer,
+        ):
+            self.assertTrue(shorts.maybe_run_daily(self._at(9)))
+            self.assertFalse(shorts.maybe_run_daily(self._at(10)))
+
+        self.assertEqual(offer.call_count, 1)
+
+    def test_no_hour_means_no_schedule(self):
+        """정하지 않았으면 직접 칠 때만 돈다."""
+        shorts = self._bot("")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": ""}, clear=False),
+            patch.object(shorts, "_offer_today") as offer,
+        ):
+            self.assertFalse(shorts.maybe_run_daily(self._at(23)))
+        offer.assert_not_called()
+
+    def test_a_nonsense_hour_is_ignored_rather_than_crashing(self):
+        for bad in ("아침", "25", "-1"):
+            with self.subTest(hour=bad):
+                shorts = self._bot(bad)
+                with (
+                    patch.dict(bot.config.telegram, {"daily_hour": bad}, clear=False),
+                    patch.object(shorts, "_offer_today") as offer,
+                ):
+                    self.assertFalse(shorts.maybe_run_daily(self._at(12)))
+                offer.assert_not_called()
 
 
 if __name__ == "__main__":

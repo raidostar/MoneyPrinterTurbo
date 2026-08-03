@@ -21,7 +21,7 @@ from loguru import logger
 
 from app.config import config
 from app.models.schema import VideoParams
-from app.services import llm
+from app.services import cardscript, cardvideo, daily, llm
 from app.services import task as tm
 from app.utils import utils
 
@@ -40,6 +40,10 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # getUpdates 가 한 번에 돌려줄 업데이트 수. 텔레그램 상한은 100 이다.
 MAX_UPDATES_PER_POLL = 20
 MAX_SCRIPT_LENGTH = 3500
+# 하루에 보여 줄 후보 수. 더 늘리면 고르는 일 자체가 일이 된다.
+DAILY_CANDIDATES = 3
+# 매일 후보를 보내는 시각(로컬 24시간). 비워 두면 /오늘 을 직접 칠 때만 돈다.
+DEFAULT_DAILY_HOUR = ""
 
 
 class TelegramConfigError(RuntimeError):
@@ -203,6 +207,116 @@ class ShortsBot:
         self.pending: dict[str, str] = {}
         self.rendering = False
         self._lock = threading.Lock()
+        # 오늘 보여 준 후보. 버튼을 누르면 여기서 찾는다.
+        self.candidates: dict[str, object] = {}
+        self.last_daily_date = ""
+
+    # ---- 매일 ----
+
+    def _daily_hour(self) -> int | None:
+        """설정된 발송 시각. 안 정했으면 ``None``."""
+        raw = str(config.telegram.get("daily_hour", DEFAULT_DAILY_HOUR) or "").strip()
+        if not raw:
+            return None
+        try:
+            hour = int(raw)
+        except ValueError:
+            logger.warning("telegram daily_hour is not a number, skipping the schedule")
+            return None
+        return hour if 0 <= hour <= 23 else None
+
+    def maybe_run_daily(self, now=None) -> bool:
+        """
+        정해진 시각이 지났고 오늘 아직 안 보냈으면 후보를 보낸다.
+
+        날짜로 기억한다. 시각만 보면 그 시간대 안에서 폴링이 도는 동안 계속
+        보내게 되고, 몇 분마다 같은 목록이 온다.
+        """
+        hour = self._daily_hour()
+        if hour is None:
+            return False
+
+        now = now or time.localtime()
+        today = time.strftime("%Y-%m-%d", now)
+        if self.last_daily_date == today or now.tm_hour < hour:
+            return False
+
+        self.last_daily_date = today
+        self._offer_today()
+        return True
+
+    # ---- 오늘의 소재 ----
+
+    def _offer_today(self) -> None:
+        """오늘 다룰 만한 것을 찾아 후보로 보여 준다."""
+        _send(self.chat_id, "오늘 올라온 것 보는 중…")
+        picks = daily.pick_items(limit=DAILY_CANDIDATES)
+        if not picks:
+            _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
+            return
+
+        self.candidates = {}
+        for index, pick in enumerate(picks, start=1):
+            token = uuid4().hex[:8]
+            self.candidates[token] = pick.item
+            _send(
+                self.chat_id,
+                f"{index}. {pick.item.title}\n{pick.reason}\n"
+                f"{pick.item.url or pick.item.discussion_url}",
+                buttons=[[{"text": "이걸로", "callback_data": f"pick:{token}"}]],
+            )
+
+    def _draft_cards(self, item) -> None:
+        """고른 소재로 카드 대본을 만들어 승인을 받는다."""
+        _send(self.chat_id, "카드 만드는 중…")
+        script = cardscript.build_card_script(item)
+        if not script:
+            _send(self.chat_id, "이 소재로는 카드가 안 나왔어요. 다른 걸 골라 주세요.")
+            return
+
+        draft_id = uuid4().hex[:8]
+        self.pending = {
+            "subject": item.title,
+            "script": script.narration_text,
+            "draft_id": draft_id,
+            "card_script": script,
+            "item": item,
+        }
+        lines = []
+        for card in script.cards:
+            lines.append(f"[{card.index_label}] {card.title}")
+            lines.extend(f"    · {bullet}" for bullet in card.body)
+        _send(
+            self.chat_id,
+            "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_LENGTH - 100],
+            buttons=[
+                [
+                    {"text": "승인", "callback_data": f"approve:{draft_id}"},
+                    {"text": "취소", "callback_data": f"cancel:{draft_id}"},
+                ]
+            ],
+        )
+
+    def _render_cards(self, item, script) -> None:
+        """카드뉴스를 만들어 보낸다."""
+        task_id = utils.get_uuid()
+        try:
+            result = cardvideo.render_card_news(task_id, script, _build_params("", ""))
+            if not result:
+                _send(self.chat_id, "영상 생성에 실패했어요. 로그를 확인해 주세요.")
+                return
+            # 만든 것만 기록한다. 후보로 보여 주기만 한 소재는 내일 다시 나온다.
+            daily.mark_used(item)
+            _send_video(self.chat_id, result.video_path, caption=item.title)
+        except Exception as exc:
+            logger.error(
+                f"telegram card render failed: {task_id}, "
+                f"{type(exc).__name__}: {llm.sanitize_error_message(exc)}"
+            )
+            _send(self.chat_id, f"영상 생성 중 오류가 났어요: {type(exc).__name__}")
+        finally:
+            with self._lock:
+                self.rendering = False
 
     # ---- 대본 ----
 
@@ -275,12 +389,16 @@ class ShortsBot:
 
         subject = self.pending.get("subject", "")
         script = self.pending.get("script", "")
+        card_script = self.pending.get("card_script")
+        item = self.pending.get("item")
         self.pending = {}
         _send(self.chat_id, "만들기 시작했어요. 십 분쯤 걸립니다.")
         # 폴링을 막지 않도록 따로 돌린다. 렌더링 중에도 명령을 받을 수 있어야 한다.
-        threading.Thread(
-            target=self._render, args=(subject, script), daemon=True
-        ).start()
+        if card_script is not None:
+            target, arguments = self._render_cards, (item, card_script)
+        else:
+            target, arguments = self._render, (subject, script)
+        threading.Thread(target=target, args=arguments, daemon=True).start()
 
     # ---- 수신 ----
 
@@ -297,12 +415,16 @@ class ShortsBot:
             self._draft_script(subject[:MAX_SUBJECT_LENGTH])
             return
 
+        if text.startswith("/오늘") or text.startswith("/today"):
+            self._offer_today()
+            return
+
         if text.startswith("/상태") or text.startswith("/status"):
             _send(self.chat_id, "만드는 중이에요." if self.rendering else "쉬고 있어요.")
             return
 
         if text.startswith("/"):
-            _send(self.chat_id, "쓸 수 있는 명령: /새영상 <주제>, /상태")
+            _send(self.chat_id, "쓸 수 있는 명령: /오늘, /새영상 <주제>, /상태")
             return
 
         # 명령이 아닌 글은 대본을 직접 고쳐 보낸 것으로 본다.
@@ -312,6 +434,14 @@ class ShortsBot:
     def _handle_callback(self, callback: dict) -> None:
         _answer_callback(str(callback.get("id", "")))
         action, _, draft_id = str(callback.get("data", "") or "").partition(":")
+
+        if action == "pick":
+            item = self.candidates.get(draft_id)
+            if item is None:
+                _send(self.chat_id, "지난 목록의 버튼이에요. /오늘 로 다시 불러 주세요.")
+                return
+            self._draft_cards(item)
+            return
 
         if not self.pending.get("script"):
             _send(self.chat_id, "승인할 대본이 없어요. /새영상 부터 시작해 주세요.")
@@ -399,8 +529,13 @@ class ShortsBot:
             )
         else:
             logger.info("telegram bot started")
-            _send(self.chat_id, "준비됐어요. /새영상 <주제> 로 시작하세요.")
+            _send(self.chat_id, "준비됐어요. /오늘 로 오늘 올라온 것부터 보세요.")
         while True:
+            if self.chat_id:
+                try:
+                    self.maybe_run_daily()
+                except Exception:
+                    logger.exception("the daily pick failed")
             self.poll_once()
             # getUpdates 가 롱 폴링이라 보통은 여기서 쉬지 않는다. 통신이 계속
             # 실패할 때 초당 수십 번 재시도하지 않도록 짧게 눕는다.
