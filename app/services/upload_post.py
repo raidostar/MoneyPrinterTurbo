@@ -70,7 +70,17 @@ class UploadPostService:
         않는다 — 제목이나 키를 고치고 다시 보낼 수 있어야 한다.
         """
         status = _status_of(response)
-        raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
+        # 본문을 다 읽었든 못 읽었든 연결은 돌려준다. 안 닫으면 응답이 쌓일수록
+        # 열린 소켓이 남는다.
+        with response:
+            try:
+                raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
+            except Exception as exc:
+                # 압축이 도중에 끊기면 requests 가 아니라 urllib3 의 예외가 난다.
+                # 그건 아래 `RequestException` 에 안 걸려 부르는 쪽으로 샌다.
+                logger.warning(f"could not read the upload response: {_clean(exc)}")
+                return self._unreadable("a body we could not finish reading", status)
+
         if len(raw) > MAX_RESPONSE_BYTES:
             return self._unreadable("an oversized body", status)
         try:

@@ -177,6 +177,42 @@ class TestResponseIsExternalInput(unittest.TestCase):
             self.assertNotIn("", result[field])
             self.assertLessEqual(len(result[field]), 300)
 
+    def test_a_body_that_breaks_while_reading_does_not_escape(self):
+        """
+        압축이 도중에 끊기면 requests 가 아니라 urllib3 의 예외가 난다. 그건
+        `RequestException` 에 안 걸려, 영상을 보내는 자리에서 그대로 터진다.
+        """
+        import urllib3
+
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            response.raw.read.side_effect = urllib3.exceptions.DecodeError("broken")
+            post.return_value = response
+            result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertFalse(result["success"])
+        # 어디까지 갔는지 모르는 상태다.
+        self.assertTrue(result["indeterminate"])
+
+    def test_the_response_is_closed_after_reading(self):
+        """안 닫으면 응답이 쌓일수록 열린 소켓이 남는다."""
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            post.return_value = response
+            UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        response.__exit__.assert_called()
+
     def test_a_hostile_error_message_is_sanitized(self):
         leak = json.dumps(
             {"error": "https://user:hunter2@upload.test/api?api_key=SECRET42"}
