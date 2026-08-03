@@ -1956,3 +1956,25 @@ class TestProjectJudgement(unittest.TestCase):
                               body_text="본" * 50_000)
 
         self.assertLess(len(captured["prompt"]), 12_000)
+
+    def test_a_score_that_is_not_a_whole_number_is_dropped(self):
+        """4.9 를 4 로 깎으면 모델이 매긴 것과 다른 값이 화면에 나간다."""
+        for value in (4.9, 3.5, 0.5):
+            with self.subTest(value=value):
+                payload = json.dumps({"entry": {"score": value, "reason": "x"}})
+                self.assertEqual(self._judge(payload), {})
+
+    def test_a_whole_number_written_as_a_decimal_still_counts(self):
+        payload = json.dumps({"entry": {"score": 4.0, "reason": "x"}})
+        self.assertEqual(self._judge(payload)["entry"][0], 4)
+
+    def test_a_score_that_is_not_finite_does_not_escape(self):
+        """
+        `json.loads` 는 NaN 과 Infinity 를 그대로 받는다. 그 값을 `int()` 에 넘기면
+        예외가 나고, 그건 이 함수를 지나 대본 만들기 전체를 죽인다.
+        """
+        for literal in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(literal=literal):
+                payload = '{"entry": {"score": %s, "reason": "x"}}' % literal
+                # 예외 없이 빈 결과여야 한다.
+                self.assertEqual(self._judge(payload), {})

@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 from time import perf_counter
 from typing import List
@@ -1062,6 +1063,11 @@ def _judgement_entry(entry) -> tuple[int, str] | None:
     score = entry.get("score")
     # 참/거짓은 숫자로 셀 수 있지만 점수가 아니다.
     if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    # `json.loads` 는 NaN 과 Infinity 를 그대로 받는다. 그 값을 `int()` 에 넘기면
+    # 예외가 나고, 그건 이 함수를 지나 대본 만들기 전체를 죽인다.
+    # 4.9 를 4 로 깎지도 않는다 — 모델이 매긴 것과 다른 값이 화면에 나간다.
+    if isinstance(score, float) and (not math.isfinite(score) or not score.is_integer()):
         return None
     score = int(score)
     if not MIN_JUDGEMENT_SCORE <= score <= MAX_JUDGEMENT_SCORE:
