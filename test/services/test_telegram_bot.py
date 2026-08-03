@@ -413,6 +413,38 @@ class TestDailyFlow(unittest.TestCase):
 
         self.assertIs(shorts.pending["card_script"], script)
 
+    def test_the_manifest_says_what_the_video_was_made_from(self):
+        """
+        렌더러는 매니페스트를 보완만 한다. 없으면 아무것도 안 남아, 이 경로로 만든
+        영상은 무엇으로 만들었는지 되짚을 수 없다.
+        """
+        from app.services.sources.base import SourceItem
+
+        item = SourceItem(
+            source="hackernews", item_id="42", title="글", points=117,
+            url="https://example.com/x",
+        )
+        script = SimpleNamespace(
+            cards=(SimpleNamespace(title="제목", body=("하나",)),),
+            narrations=("말",),
+        )
+        made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=1)
+
+        shorts = self._bot()
+        with (
+            patch.object(bot.cardvideo, "render_card_news", return_value=made),
+            patch.object(bot.task_artifacts, "write_script_data") as write,
+            patch.object(bot.daily, "mark_used"),
+            patch.object(bot, "_send_video"),
+            patch.object(bot, "_send"),
+        ):
+            shorts._render_cards(item, script)
+
+        payload = write.call_args.args[1]
+        self.assertEqual(payload["source"]["item_id"], "42")
+        self.assertEqual(payload["cards"][0]["narration"], "말")
+        self.assertIn("params", payload)
+
     def test_a_button_from_a_previous_list_is_refused(self):
         shorts = self._bot()
         shorts.candidates = {}
@@ -435,23 +467,26 @@ class TestDailyFlow(unittest.TestCase):
         item = SourceItem(source="hackernews", item_id="1", title="글")
         made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=5)
 
+        script = SimpleNamespace(cards=(), narrations=())
         shorts = self._bot()
         with (
             patch.object(bot.cardvideo, "render_card_news", return_value=made),
+            patch.object(bot.task_artifacts, "write_script_data"),
             patch.object(bot.daily, "mark_used") as mark,
             patch.object(bot, "_send_video"),
             patch.object(bot, "_send"),
         ):
-            shorts._render_cards(item, object())
+            shorts._render_cards(item, script)
         mark.assert_called_once_with(item)
 
         shorts = self._bot()
         with (
             patch.object(bot.cardvideo, "render_card_news", return_value=None),
+            patch.object(bot.task_artifacts, "write_script_data"),
             patch.object(bot.daily, "mark_used") as mark,
             patch.object(bot, "_send"),
         ):
-            shorts._render_cards(item, object())
+            shorts._render_cards(item, script)
         mark.assert_not_called()
 
 
@@ -488,6 +523,21 @@ class TestDailySchedule(unittest.TestCase):
             self.assertFalse(shorts.maybe_run_daily(self._at(10)))
 
         self.assertEqual(offer.call_count, 1)
+
+    def test_a_failed_offer_is_tried_again_later(self):
+        """
+        잠깐의 장애로 그날 하루가 통째로 넘어가면 안 된다. 보여 주는 데 성공한
+        다음에 날짜를 적어야 한다.
+        """
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(shorts, "_offer_today", side_effect=[False, True]) as offer,
+        ):
+            self.assertFalse(shorts.maybe_run_daily(self._at(9)))
+            self.assertTrue(shorts.maybe_run_daily(self._at(10)))
+
+        self.assertEqual(offer.call_count, 2)
 
     def test_no_hour_means_no_schedule(self):
         """정하지 않았으면 직접 칠 때만 돈다."""

@@ -21,7 +21,7 @@ from loguru import logger
 
 from app.config import config
 from app.models.schema import VideoParams
-from app.services import cardscript, cardvideo, daily, llm
+from app.services import cardscript, cardvideo, daily, llm, task_artifacts
 from app.services import task as tm
 from app.utils import utils
 
@@ -241,19 +241,27 @@ class ShortsBot:
         if self.last_daily_date == today or now.tm_hour < hour:
             return False
 
+        # 보여 주는 데 성공한 다음에 날짜를 적는다. 먼저 적으면 잠깐의 장애가
+        # 그날의 모든 재시도를 막는다.
+        if not self._offer_today():
+            return False
         self.last_daily_date = today
-        self._offer_today()
         return True
 
     # ---- 오늘의 소재 ----
 
-    def _offer_today(self) -> None:
-        """오늘 다룰 만한 것을 찾아 후보로 보여 준다."""
+    def _offer_today(self) -> bool:
+        """
+        오늘 다룰 만한 것을 찾아 후보로 보여 준다. 보여 줬으면 ``True``.
+
+        수집 실패도 '오늘 새 글이 없음' 도 빈 목록으로 온다. 둘을 구분하지 않고
+        보냈다고 치면, 잠깐의 장애 하나로 그날 하루가 통째로 넘어간다.
+        """
         _send(self.chat_id, "오늘 올라온 것 보는 중…")
         picks = daily.pick_items(limit=DAILY_CANDIDATES)
         if not picks:
             _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
-            return
+            return False
 
         self.candidates = {}
         for index, pick in enumerate(picks, start=1):
@@ -265,6 +273,7 @@ class ShortsBot:
                 f"{pick.item.url or pick.item.discussion_url}",
                 buttons=[[{"text": "이걸로", "callback_data": f"pick:{token}"}]],
             )
+        return True
 
     def _draft_cards(self, item) -> None:
         """고른 소재로 카드 대본을 만들어 승인을 받는다."""
@@ -301,7 +310,33 @@ class ShortsBot:
         """카드뉴스를 만들어 보낸다."""
         task_id = utils.get_uuid()
         try:
-            result = cardvideo.render_card_news(task_id, script, _build_params("", ""))
+            params = _build_params("", "")
+            # 렌더러는 매니페스트를 보완만 한다. 없으면 아무것도 안 남으므로
+            # 여기서 먼저 만든다. 이 경로로 만든 영상도 무엇으로 만들었는지
+            # 되짚을 수 있어야 한다.
+            task_artifacts.write_script_data(
+                task_id,
+                {
+                    "source": {
+                        "name": item.source,
+                        "item_id": item.item_id,
+                        "title": item.title,
+                        "url": item.url,
+                        "discussion_url": item.discussion_url,
+                        "points": item.points,
+                    },
+                    "cards": [
+                        {
+                            "title": card.title,
+                            "bullets": list(card.body),
+                            "narration": narration,
+                        }
+                        for card, narration in zip(script.cards, script.narrations)
+                    ],
+                    "params": params.model_dump(mode="json"),
+                },
+            )
+            result = cardvideo.render_card_news(task_id, script, params)
             if not result:
                 _send(self.chat_id, "영상 생성에 실패했어요. 로그를 확인해 주세요.")
                 return
