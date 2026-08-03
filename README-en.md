@@ -198,7 +198,7 @@ Create a video with the topic "How AI is changing everyday life."
 
 Want to try shipcast without setting up a local environment? Run it directly in Google Colab!
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/harry0703/MoneyPrinterTurbo/blob/main/docs/shipcast.ipynb)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/raidostar/MoneyPrinterTurbo/blob/main/docs/shipcast.ipynb)
 
 ### Windows
 

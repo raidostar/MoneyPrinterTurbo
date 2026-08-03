@@ -48,12 +48,14 @@ class TestTheOldNameIsGone(unittest.TestCase):
 
         self.assertEqual(offenders, [], f"옛 이름이 남아 있다: {offenders}")
 
-    def test_the_upstream_credit_survives(self):
+    def test_the_readme_says_where_this_came_from(self):
         """
-        갈라져 나온 곳을 지우면 안 된다. 영상 파이프라인 대부분이 그쪽 코드다.
+        이름을 바꾸면서 출처를 지우면 안 된다. 영상 파이프라인 대부분이 그쪽 코드다.
         """
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("harry0703/MoneyPrinterTurbo", readme)
+        self.assertIn("## 만든 것에 대해", readme)
+        credit = readme.split("## 만든 것에 대해", 1)[1]
+        self.assertIn("harry0703/MoneyPrinterTurbo", credit)
 
 
 class TestOneIdentity(unittest.TestCase):
@@ -114,6 +116,24 @@ class TestOperationalLinksPointHere(unittest.TestCase):
             if "github.com" in line and "issues" in line:
                 with self.subTest(line=line.strip()):
                     self.assertIn("raidostar/", line)
+
+
+class TestDocumentedPathsExist(unittest.TestCase):
+    def test_every_linked_repository_file_is_there(self):
+        """
+        이름을 바꾸다 보면 링크 속 파일명만 바뀌고 파일은 그대로 남는다. 그러면
+        안내된 진입점이 404 가 된다.
+        """
+        import re
+
+        pattern = re.compile(r"blob/main/([A-Za-z0-9_./-]+)")
+        for name in ("README.md", "README-en.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for relative in pattern.findall(text):
+                with self.subTest(readme=name, path=relative):
+                    self.assertTrue(
+                        (ROOT / relative).exists(), f"{relative} 가 없다"
+                    )
 
 
 if __name__ == "__main__":
