@@ -938,6 +938,11 @@ MAX_CARD_TITLE_LENGTH = 60
 MAX_CARD_BULLETS = 3
 MAX_CARD_BULLET_LENGTH = 60
 MAX_CARD_NARRATION_LENGTH = 200
+MAX_CARD_SOURCE_LENGTH = 60
+MAX_CARD_URL_LENGTH = 500
+# 응답은 외부 입력이다. 파싱한 뒤에 카드 수를 줄여 봐야, 그 전에 이미 통째로
+# 메모리에 올려 디코딩한 뒤다.
+MAX_CARD_SCRIPT_RESPONSE_CHARS = 100_000
 
 CARD_SCRIPT_SYSTEM_PROMPT = """
 # Role
@@ -1043,6 +1048,10 @@ def generate_card_script(
         max_narration=MAX_CARD_NARRATION_LENGTH,
     )
     # 소재는 밖에서 온 글이다. 규칙 옆에 그대로 붙이면 거기 적힌 문장이 지시로 읽힌다.
+    # 이 함수는 서비스 안에서도 직접 불린다. 상한은 프롬프트를 만드는 자리에 있어야
+    # 어느 입구로 들어와도 지켜진다.
+    source = _limit_social_text(source, MAX_CARD_SOURCE_LENGTH, "source")
+    url = _limit_social_text(url, MAX_CARD_URL_LENGTH, "url")
     prompt += (
         f"\n\n# Material (data)\n<item>\n"
         f"title: {_as_prompt_data(title)}\n"
@@ -1063,6 +1072,11 @@ def generate_card_script(
         if response.startswith("Error:"):
             logger.error(f"failed to generate a card script: {response[:200]}")
             return []
+        if len(response) > MAX_CARD_SCRIPT_RESPONSE_CHARS:
+            logger.warning(
+                f"card script response is too long ({len(response)} characters)"
+            )
+            continue
         try:
             payload = json.loads(_strip_code_fence(response))
         except Exception as exc:
@@ -1081,10 +1095,14 @@ def generate_card_script(
             )
             if card
         ]
-        if cards:
+        # 카드 한두 장은 카드뉴스가 아니다. 여는 장, 본론, 닫는 장이 있어야 한다.
+        # 모자라면 이 소재는 오늘 쓰지 않는다 — 한 장짜리 영상을 내보내는 것보다 낫다.
+        if len(cards) >= MIN_CARD_SCRIPT_CARDS:
             logger.success(f"generated a card script with {len(cards)} cards")
             return cards
-        logger.warning(f"card script had no usable cards, retrying... {attempt + 1}")
+        logger.warning(
+            f"card script had only {len(cards)} usable cards, retrying... {attempt + 1}"
+        )
 
     return []
 
