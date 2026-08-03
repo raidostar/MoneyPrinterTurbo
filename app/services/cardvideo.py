@@ -12,9 +12,13 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+import numpy as np
+
 from app.services import bgm as bgm_service
-from app.services import cardnews, video as video_service, voice
+from app.services import cardnews, llm, video as video_service, voice
 from app.services.cardscript import CardScript
+
+SILENCE_FPS = 44100
 
 MAX_NARRATION_ATTEMPTS = 2
 # 나레이션이 없는 카드도 잠깐은 보여 준다. 글이 있는데 지나쳐 버리면 안 된다.
@@ -29,6 +33,19 @@ class CardVideoResult:
     card_count: int
 
 
+def _silence_clip(seconds: float):
+    """
+    무음 조각. 화면만 있고 소리가 없는 카드의 자리를 메운다.
+
+    ffmpeg 를 부르지 않고 메모리에서 만든다. 타임라인을 맞추는 일이 외부 도구의
+    성공 여부에 걸리면, 그 도구가 실패했을 때 어긋난 영상이 나온다.
+    """
+    from moviepy import AudioArrayClip
+
+    frames = max(1, int(SILENCE_FPS * max(seconds, 0.1)))
+    return AudioArrayClip(np.zeros((frames, 2)), fps=SILENCE_FPS)
+
+
 def _narrate(text: str, target_path: str, params) -> float:
     """
     카드 하나의 나레이션을 만들고 길이를 돌려준다. 실패하면 ``0``.
@@ -37,17 +54,25 @@ def _narrate(text: str, target_path: str, params) -> float:
     나머지는 그대로 나온다.
     """
     for attempt in range(MAX_NARRATION_ATTEMPTS):
-        # 음량은 아래에서 클립에 한 번만 건다. 여기서도 걸면 제공자에 따라 두 번
-        # 곱해져, 0.2 를 넣은 사람이 0.04 를 듣게 된다.
-        sub_maker = voice.tts(
-            text=text,
-            voice_name=params.voice_name,
-            voice_rate=params.voice_rate,
-            voice_file=target_path,
-            voice_volume=1.0,
-        )
-        if sub_maker and os.path.exists(target_path):
-            return voice.get_audio_duration(target_path)
+        try:
+            # 음량은 아래에서 클립에 한 번만 건다. 여기서도 걸면 제공자에 따라 두 번
+            # 곱해져, 0.2 를 넣은 사람이 0.04 를 듣게 된다.
+            sub_maker = voice.tts(
+                text=text,
+                voice_name=params.voice_name,
+                voice_rate=params.voice_rate,
+                voice_file=target_path,
+                voice_volume=1.0,
+            )
+            if sub_maker and os.path.exists(target_path):
+                return voice.get_audio_duration(target_path)
+        except Exception as exc:
+            # 제공자는 실패를 반환값이 아니라 예외로 알리기도 한다. 그대로 두면
+            # 재시도도 무음 처리도 건너뛰고 영상 전체가 죽는다.
+            logger.warning(
+                f"card narration raised: {type(exc).__name__}: "
+                f"{llm.sanitize_error_message(exc)}"
+            )
         logger.warning(f"card narration failed, retrying... {attempt + 1}")
     return 0.0
 
@@ -65,7 +90,8 @@ def render_card_news(
 
     os.makedirs(output_dir, exist_ok=True)
     durations: list[float] = []
-    narration_paths: list[str] = []
+    # 경로가 ``None`` 이면 그 자리는 무음이다.
+    narration_paths: list[str | None] = []
 
     for index, narration in enumerate(script.narrations, start=1):
         target = os.path.join(output_dir, f"card-{index:02d}.mp3")
@@ -75,13 +101,11 @@ def render_card_news(
             durations.append(seconds)
             continue
 
-        # 소리 없이 지나가는 카드. 오디오 쪽에도 같은 길이의 무음을 넣어야 한다.
+        # 소리 없이 지나가는 카드. 오디오 쪽에도 같은 길이의 자리를 만들어야 한다.
         # 빼 버리면 그 뒤 카드의 소리가 화면보다 먼저 나오고, 어긋남이 끝까지 남는다.
-        silence = os.path.join(output_dir, f"card-{index:02d}-silence.mp3")
-        if voice.generate_silent_audio(FALLBACK_CARD_SECONDS, silence):
-            narration_paths.append(silence)
-        else:
-            logger.warning(f"could not pad the timeline for card {index}")
+        # 파일로 만들지 않고 메모리에서 만드는 이유는, 이 자리를 채우는 일이
+        # 외부 도구의 성공 여부에 걸려서는 안 되기 때문이다.
+        narration_paths.append(None)
         durations.append(FALLBACK_CARD_SECONDS)
 
     if not durations:
@@ -98,7 +122,10 @@ def render_card_news(
         audio_clip = None
         if narration_paths:
             narration_clips = [
-                clips.enter_context(AudioFileClip(path)) for path in narration_paths
+                clips.enter_context(AudioFileClip(path))
+                if path
+                else clips.enter_context(_silence_clip(FALLBACK_CARD_SECONDS))
+                for path in narration_paths
             ]
             audio_clip = clips.enter_context(
                 concatenate_audioclips(narration_clips).with_effects(
@@ -143,7 +170,7 @@ def render_card_news(
     )
     return CardVideoResult(
         video_path=video_path,
-        audio_path=narration_paths[0] if narration_paths else "",
+        audio_path=next((path for path in narration_paths if path), ""),
         duration=duration,
         card_count=len(script.cards),
     )

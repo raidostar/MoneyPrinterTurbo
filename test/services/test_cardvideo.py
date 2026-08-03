@@ -97,17 +97,31 @@ class TestTimelineStaysAligned(unittest.TestCase):
         lengths = iter([2.0, 0.0, 3.0])
         with (
             patch.object(cardvideo, "_narrate", side_effect=lambda *a, **k: next(lengths)),
-            patch.object(cardvideo.voice, "generate_silent_audio", return_value=True) as silence,
+            patch.object(cardvideo, "_silence_clip") as silence,
             _silent_moviepy(7.5),
             patch("moviepy.AudioFileClip") as audio,
         ):
             with tempfile.TemporaryDirectory() as work:
                 cardvideo.render_card_news("t", _script(3), _params(), work)
 
-        silence.assert_called_once()
-        self.assertAlmostEqual(silence.call_args.args[0], cardvideo.FALLBACK_CARD_SECONDS)
-        # 카드가 셋이면 오디오 조각도 셋이어야 순서가 맞는다.
-        self.assertEqual(audio.call_count, 3)
+        # 소리가 난 카드 둘은 파일에서, 실패한 하나는 무음으로. 합쳐서 셋이어야
+        # 카드와 순서가 맞는다.
+        self.assertEqual(audio.call_count, 2)
+        silence.assert_called_once_with(cardvideo.FALLBACK_CARD_SECONDS)
+
+    def test_padding_does_not_depend_on_an_external_tool(self):
+        """
+        ffmpeg 로 무음 파일을 만들다 실패하면 그 자리가 비고, 어긋난 영상이 나온다.
+        타임라인을 맞추는 일이 외부 도구의 성공 여부에 걸려서는 안 된다.
+        """
+        with patch.object(cardvideo.voice, "generate_silent_audio") as external:
+            clip = cardvideo._silence_clip(2.5)
+            try:
+                self.assertAlmostEqual(clip.duration, 2.5, places=2)
+            finally:
+                clip.close()
+
+        external.assert_not_called()
 
     def test_every_source_reader_is_closed(self):
         """
@@ -154,6 +168,33 @@ class TestTimelineStaysAligned(unittest.TestCase):
 
 
 class TestNarrationRetry(unittest.TestCase):
+    def test_a_provider_exception_does_not_kill_the_render(self):
+        """
+        제공자는 실패를 반환값이 아니라 예외로 알리기도 한다. 그대로 두면
+        재시도도 무음 처리도 건너뛰고 영상 전체가 죽는다.
+        """
+        with tempfile.TemporaryDirectory() as work:
+            with patch.object(
+                cardvideo.voice, "tts", side_effect=RuntimeError("provider down")
+            ):
+                seconds = cardvideo._narrate(
+                    "말", os.path.join(work, "card.mp3"), _params()
+                )
+        self.assertEqual(seconds, 0.0)
+
+    def test_a_provider_exception_is_not_logged_with_credentials(self):
+        """예외 문구에 자격 증명이 붙은 주소가 섞여 나올 수 있다."""
+        leaky = RuntimeError("failed https://user:hunter2@tts.example.com")
+        with tempfile.TemporaryDirectory() as work:
+            with (
+                patch.object(cardvideo.voice, "tts", side_effect=leaky),
+                patch.object(cardvideo.logger, "warning") as warning,
+            ):
+                cardvideo._narrate("말", os.path.join(work, "c.mp3"), _params())
+
+        logged = " ".join(str(call.args[0]) for call in warning.call_args_list)
+        self.assertNotIn("hunter2", logged)
+
     def test_a_failed_synthesis_is_retried(self):
         """일시적인 실패 하나로 그 카드가 조용해지지 않게 한다."""
         params = _params()
