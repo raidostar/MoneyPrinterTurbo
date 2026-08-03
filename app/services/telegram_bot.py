@@ -452,8 +452,15 @@ class ShortsBot:
         if result.skipped:
             _send(self.chat_id, f"올리지 않았어요: {result.skipped}")
             return
+        if result.unknown:
+            # 다시 누르면 두 번 올라갈 수 있다. 어디까지 갔는지 직접 봐야 한다.
+            _send(
+                self.chat_id,
+                f"보내다 끊겼어요. 올라갔는지 계정에서 확인해 주세요: {result.error}",
+            )
+            return
         if not result.ok:
-            _send(self.chat_id, f"업로드에 실패했어요: {result.error[:200]}")
+            _send(self.chat_id, f"업로드에 실패했어요: {result.error}")
             return
         _send(self.chat_id, f"올렸어요: {', '.join(result.platforms)}")
 
@@ -469,6 +476,10 @@ class ShortsBot:
                 _send(self.chat_id, "영상 생성에 실패했어요. 로그를 확인해 주세요.")
                 return
             _send_video(self.chat_id, videos[0], caption=subject)
+            # 자동으로 올리기로 해 뒀으면 영상 파이프라인이 이미 올렸다. 여기서
+            # 또 부르면 같은 영상이 두 번 나간다.
+            if not publish.auto_publishes(publish.SHORTS):
+                self._offer_publish(publish.SHORTS, videos[0], subject)
         except Exception as exc:
             # 파이프라인 전체를 감싸므로 제공자 예외가 그대로 올라온다. 그 메시지에는
             # 자격 증명이 붙은 주소가 섞일 수 있어, 트레이스백째로 남기지 않는다.

@@ -40,17 +40,28 @@ class UploadPostService:
         응답은 외부 입력이다. 통째로 올려 파싱하면 거대한 본문 하나에 흔들리고,
         JSON 이 아닐 때 나는 예외는 아래 `RequestException` 에 걸리지 않아 부르는
         쪽으로 그대로 새어 나간다.
+
+        읽지 못한 응답은 실패로 보되, 저쪽이 받았는지는 알 수 없다고 표시한다.
+        요청은 이미 나갔고 응답만 못 읽은 것일 수 있다.
         """
         raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
         if len(raw) > MAX_RESPONSE_BYTES:
-            return {"success": False, "error": "Upload-Post returned an oversized body"}
+            return self._unreadable("an oversized body")
         try:
             result = json.loads(raw)
         except ValueError:
-            return {"success": False, "error": "Upload-Post returned a body we cannot read"}
+            return self._unreadable("a body we cannot read")
         if not isinstance(result, dict):
-            return {"success": False, "error": "Upload-Post returned an unexpected body"}
+            return self._unreadable("an unexpected body")
         return result
+
+    @staticmethod
+    def _unreadable(what: str) -> dict:
+        return {
+            "success": False,
+            "error": f"Upload-Post returned {what}",
+            "indeterminate": True,
+        }
 
     def upload_video(
         self,
@@ -127,8 +138,15 @@ class UploadPostService:
                 return result
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to cross-post video: {str(e)}")
-            return {"success": False, "error": str(e)}
+            # 예외 문구에 자격 증명이 붙은 주소가 섞일 수 있다. 이 값은 기록과
+            # 화면으로 그대로 흘러간다. 정리기만 쓰려고 모듈 전체를 위에서 불러오면
+            # 올리기와 상관없는 제공자 SDK 까지 매번 따라 올라온다.
+            from app.services.llm import sanitize_error_message
+
+            message = sanitize_error_message(e)
+            logger.error(f"Failed to cross-post video: {message}")
+            # 보내는 도중에 끊긴 것이라, 저쪽이 받았는지 여기서는 알 수 없다.
+            return {"success": False, "error": message, "indeterminate": True}
 
     def check_status(self, request_id: str) -> dict:
         """

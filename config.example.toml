@@ -280,7 +280,9 @@ upload_post_username = ""
 # Available values: "tiktok", "instagram", "youtube", "x", "threads",
 # "facebook", "linkedin", "pinterest", "bluesky", "reddit".
 upload_post_platforms = ["tiktok", "instagram", "youtube", "x", "threads"]
-# Automatically publish successful video outputs after generation.
+# When true, every finished video is published straight from the generation
+# pipeline. When false, the Telegram bot asks first and the API and WebUI do
+# not publish at all.
 upload_post_auto_upload = false
 
 # Card news (/오늘).

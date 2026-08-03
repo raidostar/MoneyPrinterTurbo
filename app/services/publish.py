@@ -79,6 +79,9 @@ class PublishResult:
     error: str = ""
     skipped: str = ""
     request_id: str = ""
+    # 보내다 끊겨서 저쪽이 받았는지 알 수 없는 경우. 그냥 실패와 다르게 다뤄야
+    # 한다 — 다시 보내면 두 번 올라갈 수 있다.
+    unknown: bool = False
 
 
 def _setting(prefix: str, name: str, default=None):
@@ -265,16 +268,23 @@ def publish(
         # 전송 계층은 실패를 반환값으로 알리기로 되어 있지만, 응답 파싱이나 파일
         # 읽기에서 나는 예외까지 전부 막아 주지는 않는다. 여기서 새면 이미 만들어
         # 둔 영상을 보내는 자리에서 봇이 죽는다.
+        #
+        # 자리는 놓지 않는다. 요청이 나간 뒤에 터진 것일 수 있고, 그러면 다시
+        # 보내는 순간 두 번 올라간다.
         logger.warning(f"publish raised: {type(exc).__name__}")
-        _release(video_path)
         return PublishResult(
             ok=False,
             platforms=target.platforms,
             error=llm.sanitize_error_message(exc)[:MAX_ERROR_LENGTH],
+            unknown=True,
         )
 
     if not isinstance(response, dict):
-        response = {"success": False, "error": "upload-post returned nothing usable"}
+        response = {
+            "success": False,
+            "error": "upload-post returned nothing usable",
+            "indeterminate": True,
+        }
 
     if not response.get("success"):
         # 오류 문구는 남의 서버가 적어 보낸 값이다. 그대로 기록과 화면으로 보내면
@@ -283,9 +293,15 @@ def publish(
             response.get("error") or response.get("message") or "unknown upload error"
         )
         error = " ".join(error.split())[:MAX_ERROR_LENGTH]
-        logger.warning(f"publish failed: {error}")
-        _release(video_path)
-        return PublishResult(ok=False, platforms=target.platforms, error=error)
+        # 저쪽이 분명히 거절한 것만 다시 보낼 수 있게 한다. 보내다 끊긴 것은
+        # 받았을 수도 있어, 자리를 잡아 둔 채로 둔다.
+        unknown = bool(response.get("indeterminate"))
+        logger.warning(f"publish {'is unresolved' if unknown else 'failed'}: {error}")
+        if not unknown:
+            _release(video_path)
+        return PublishResult(
+            ok=False, platforms=target.platforms, error=error, unknown=unknown
+        )
 
     request_id = " ".join(str(response.get("request_id", "")).split())[
         :MAX_REQUEST_ID_LENGTH

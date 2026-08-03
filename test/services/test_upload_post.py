@@ -127,6 +127,15 @@ class TestResponseIsExternalInput(unittest.TestCase):
         result = self._upload(b"<html>gateway timeout</html>")
         self.assertFalse(result["success"])
 
+    def test_a_body_we_could_not_read_says_it_does_not_know(self):
+        """
+        요청은 이미 나갔고 응답만 못 읽은 것일 수 있다. 그냥 실패로 알리면 부르는
+        쪽이 다시 보내 같은 영상을 두 번 올린다.
+        """
+        for body in (b"<html>502</html>", b'["not", "an", "object"]'):
+            with self.subTest(body=body[:20]):
+                self.assertTrue(self._upload(body).get("indeterminate"))
+
     def test_a_body_that_is_not_an_object_is_a_failure(self):
         result = self._upload(b'["not", "an", "object"]')
         self.assertFalse(result["success"])
@@ -194,6 +203,37 @@ class TestUploadPostService(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn("upload timed out", result["error"])
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_network_error_is_sanitized_before_it_leaves(self, mock_post, _exists):
+        """예외 문구는 기록과 화면으로 그대로 흘러간다."""
+        mock_post.side_effect = requests.exceptions.ConnectionError(
+            "cannot reach https://user:hunter2@upload.test/api?api_key=SECRET42"
+        )
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertFalse(result["success"])
+        self.assertNotIn("hunter2", result["error"])
+        self.assertNotIn("SECRET42", result["error"])
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_send_that_was_cut_off_says_it_does_not_know(self, mock_post, _exists):
+        """
+        저쪽이 받고 나서 응답만 끊겼을 수 있다. 그냥 실패와 같은 값으로 알리면
+        부르는 쪽이 다시 보내 두 번 올린다.
+        """
+        mock_post.side_effect = requests.exceptions.Timeout("upload timed out")
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertTrue(result["indeterminate"])
 
     @patch("app.services.upload_post.config.app", _CONFIG_BASE)
     @patch("app.services.upload_post.requests.get")

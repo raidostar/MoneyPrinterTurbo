@@ -172,8 +172,6 @@ class TestPublish(unittest.TestCase):
             ):
                 result = publish.publish(publish.CARD_NEWS, self.video, "제목")
         self.assertFalse(result.ok)
-        # 못 올렸으니 다시 시도할 수 있어야 한다.
-        self.assertFalse(publish.already_published(self.video))
 
     def test_a_response_that_is_not_a_dictionary_is_a_failure(self):
         result, _ = self._publish(sent="nope")
@@ -249,6 +247,63 @@ class TestNotTwice(unittest.TestCase):
                 result = publish.publish(publish.CARD_NEWS, self.video, "제목")
 
         self.assertEqual(result.skipped, "already published")
+        call.assert_not_called()
+
+    def test_a_send_that_was_cut_off_is_not_retried_on_its_own(self):
+        """
+        저쪽이 받고 나서 응답만 끊긴 것일 수 있다. 다시 보내면 두 번 올라간다.
+        """
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                return_value={
+                    "success": False,
+                    "error": "connection reset",
+                    "indeterminate": True,
+                },
+            ):
+                result = publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+            self.assertFalse(result.ok)
+            self.assertTrue(result.unknown)
+
+            with patch.object(publish.upload_post, "cross_post_video") as call:
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
+        call.assert_not_called()
+
+    def test_a_refusal_can_be_sent_again(self):
+        """저쪽이 분명히 거절한 것은 안 올라간 것이다."""
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                return_value={"success": False, "error": "title too long"},
+            ):
+                result = publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+            self.assertFalse(result.unknown)
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                return_value={"success": True, "request_id": "r-1"},
+            ) as call:
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
+        call.assert_called_once()
+
+    def test_an_exception_leaves_the_claim_in_place(self):
+        """요청이 나간 뒤에 터진 것일 수 있다."""
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                side_effect=RuntimeError("boom"),
+            ):
+                result = publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+            self.assertTrue(result.unknown)
+            with patch.object(publish.upload_post, "cross_post_video") as call:
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
         call.assert_not_called()
 
     def test_a_receipt_that_could_not_be_written_still_blocks_a_second_upload(self):

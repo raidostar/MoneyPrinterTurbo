@@ -798,6 +798,48 @@ class TestPublishing(unittest.TestCase):
             shorts._offer_publish(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
         now.assert_called_once_with(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
 
+    def _render_shorts(self, shorts):
+        with (
+            patch.object(bot.tm, "start", return_value={"videos": ["/tmp/s.mp4"]}),
+            patch.object(bot, "_send_video"),
+            patch.object(shorts, "_offer_publish") as offer,
+        ):
+            shorts._render("주제", "대본")
+        return offer
+
+    def test_a_finished_short_is_offered_for_publishing(self):
+        """물어보고 올리기로 해 뒀는데 아무것도 안 물어보면 영상이 안 나간다."""
+        shorts = self._bot()
+        with patch.object(bot.publish, "auto_publishes", return_value=False):
+            offer = self._render_shorts(shorts)
+
+        offer.assert_called_once_with(bot.publish.SHORTS, "/tmp/s.mp4", "주제")
+
+    def test_a_short_that_the_pipeline_already_sent_is_not_offered(self):
+        """영상 파이프라인이 이미 올렸다. 여기서 또 부르면 두 번 나간다."""
+        shorts = self._bot()
+        with patch.object(bot.publish, "auto_publishes", return_value=True):
+            offer = self._render_shorts(shorts)
+
+        offer.assert_not_called()
+
+    def test_an_unresolved_upload_is_not_reported_as_a_plain_failure(self):
+        """
+        다시 누르면 두 번 올라갈 수 있다. 실패했다고만 하면 그렇게 하게 된다.
+        """
+        shorts = self._bot()
+        unresolved = bot.publish.PublishResult(
+            ok=False, error="connection reset", unknown=True
+        )
+        with (
+            patch.object(bot.publish, "publish", return_value=unresolved),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._publish_now(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+
+        said = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("확인", said)
+
     def test_a_finished_card_video_is_offered_for_publishing(self):
         """만들어 놓고 올리지 않으면 자동화가 마지막 한 칸에서 끊긴다."""
         from app.services.sources.base import SourceItem
