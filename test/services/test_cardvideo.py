@@ -86,6 +86,73 @@ class TestNarrationDrivesTiming(unittest.TestCase):
         narrate.assert_not_called()
 
 
+class TestTimelineStaysAligned(unittest.TestCase):
+    """화면과 소리가 어긋나지 않는 것이 이 설계의 이유 전부다."""
+
+    def test_a_failed_card_is_padded_with_silence(self):
+        """
+        실패한 카드를 오디오에서 빼 버리면 그 뒤 카드의 소리가 화면보다 먼저
+        나오고, 어긋남이 끝까지 남는다.
+        """
+        lengths = iter([2.0, 0.0, 3.0])
+        with (
+            patch.object(cardvideo, "_narrate", side_effect=lambda *a, **k: next(lengths)),
+            patch.object(cardvideo.voice, "generate_silent_audio", return_value=True) as silence,
+            _silent_moviepy(7.5),
+            patch("moviepy.AudioFileClip") as audio,
+        ):
+            with tempfile.TemporaryDirectory() as work:
+                cardvideo.render_card_news("t", _script(3), _params(), work)
+
+        silence.assert_called_once()
+        self.assertAlmostEqual(silence.call_args.args[0], cardvideo.FALLBACK_CARD_SECONDS)
+        # 카드가 셋이면 오디오 조각도 셋이어야 순서가 맞는다.
+        self.assertEqual(audio.call_count, 3)
+
+    def test_every_source_reader_is_closed(self):
+        """
+        합쳐진 클립만 닫으면 자식 리더가 남는다. 반복 렌더링에서 ffmpeg 프로세스와
+        파일 잠금이 쌓인다.
+        """
+        opened = []
+
+        def make_clip(*_args, **_kwargs):
+            clip = MagicMock()
+            clip.__enter__ = MagicMock(return_value=clip)
+            clip.__exit__ = MagicMock(return_value=False)
+            opened.append(clip)
+            return clip
+
+        with (
+            patch.object(cardvideo, "_narrate", return_value=2.0),
+            _silent_moviepy(6.0),
+            patch("moviepy.AudioFileClip", side_effect=make_clip),
+        ):
+            with tempfile.TemporaryDirectory() as work:
+                cardvideo.render_card_news("t", _script(3), _params(), work)
+
+        self.assertEqual(len(opened), 3)
+        for clip in opened:
+            self.assertTrue(clip.__exit__.called, "원본 리더가 닫히지 않았다")
+
+    def test_the_voice_volume_is_applied_once(self):
+        """
+        제공자에 따라 TTS 단계에서도 음량을 건다. 두 번 걸면 0.2 를 넣은 사람이
+        0.04 를 듣는다.
+        """
+        params = _params()
+        params.voice_volume = 0.2
+        with tempfile.TemporaryDirectory() as work:
+            with (
+                patch.object(cardvideo.voice, "tts", return_value=object()) as tts,
+                patch.object(cardvideo.voice, "get_audio_duration", return_value=1.0),
+                patch.object(cardvideo.os.path, "exists", return_value=True),
+            ):
+                cardvideo._narrate("말", os.path.join(work, "c.mp3"), params)
+
+        self.assertEqual(tts.call_args.kwargs["voice_volume"], 1.0)
+
+
 class TestNarrationRetry(unittest.TestCase):
     def test_a_failed_synthesis_is_retried(self):
         """일시적인 실패 하나로 그 카드가 조용해지지 않게 한다."""

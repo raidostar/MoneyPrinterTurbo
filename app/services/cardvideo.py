@@ -7,6 +7,7 @@
 """
 
 import os
+from contextlib import ExitStack
 from dataclasses import dataclass
 
 from loguru import logger
@@ -36,12 +37,14 @@ def _narrate(text: str, target_path: str, params) -> float:
     나머지는 그대로 나온다.
     """
     for attempt in range(MAX_NARRATION_ATTEMPTS):
+        # 음량은 아래에서 클립에 한 번만 건다. 여기서도 걸면 제공자에 따라 두 번
+        # 곱해져, 0.2 를 넣은 사람이 0.04 를 듣게 된다.
         sub_maker = voice.tts(
             text=text,
             voice_name=params.voice_name,
             voice_rate=params.voice_rate,
             voice_file=target_path,
-            voice_volume=params.voice_volume,
+            voice_volume=1.0,
         )
         if sub_maker and os.path.exists(target_path):
             return voice.get_audio_duration(target_path)
@@ -70,45 +73,60 @@ def render_card_news(
         if seconds > 0:
             narration_paths.append(target)
             durations.append(seconds)
+            continue
+
+        # 소리 없이 지나가는 카드. 오디오 쪽에도 같은 길이의 무음을 넣어야 한다.
+        # 빼 버리면 그 뒤 카드의 소리가 화면보다 먼저 나오고, 어긋남이 끝까지 남는다.
+        silence = os.path.join(output_dir, f"card-{index:02d}-silence.mp3")
+        if voice.generate_silent_audio(FALLBACK_CARD_SECONDS, silence):
+            narration_paths.append(silence)
         else:
-            # 소리 없이 지나가는 카드. 길이는 읽을 수 있을 만큼만 준다.
-            durations.append(FALLBACK_CARD_SECONDS)
+            logger.warning(f"could not pad the timeline for card {index}")
+        durations.append(FALLBACK_CARD_SECONDS)
 
     if not durations:
         logger.error(f"card news has nothing to render: {task_id}")
         return None
 
-    video_clip = cardnews.build_card_news_clip(script.cards, durations)
-    audio_clip = None
-    bgm_clip = None
-    mixed = None
-    try:
+    video_path = os.path.join(output_dir, "cardnews.mp4")
+    # 원본 리더까지 확실히 닫는다. 합쳐진 클립만 닫으면 자식 리더가 남아 ffmpeg
+    # 프로세스와 파일 잠금이 쌓인다.
+    with ExitStack() as clips:
+        video_clip = clips.enter_context(
+            cardnews.build_card_news_clip(script.cards, durations)
+        )
+        audio_clip = None
         if narration_paths:
-            # 소리 없는 카드에도 영상은 흐르므로, 오디오는 이어 붙이기만 하고
-            # 길이는 영상 쪽을 따른다.
-            narration_clips = [AudioFileClip(path) for path in narration_paths]
-            audio_clip = concatenate_audioclips(narration_clips).with_effects(
-                [afx.MultiplyVolume(params.voice_volume)]
+            narration_clips = [
+                clips.enter_context(AudioFileClip(path)) for path in narration_paths
+            ]
+            audio_clip = clips.enter_context(
+                concatenate_audioclips(narration_clips).with_effects(
+                    [afx.MultiplyVolume(params.voice_volume)]
+                )
             )
 
+        bgm_clip = None
         bgm_file = video_service.get_bgm_file(
             bgm_type=params.bgm_type, bgm_file=params.bgm_file
         )
         if bgm_file and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume):
-            bgm_clip = AudioFileClip(bgm_file).with_effects(
-                [
-                    afx.MultiplyVolume(params.bgm_volume),
-                    afx.AudioLoop(duration=video_clip.duration),
-                    afx.AudioFadeOut(2),
-                ]
+            bgm_source = clips.enter_context(AudioFileClip(bgm_file))
+            bgm_clip = clips.enter_context(
+                bgm_source.with_effects(
+                    [
+                        afx.MultiplyVolume(params.bgm_volume),
+                        afx.AudioLoop(duration=video_clip.duration),
+                        afx.AudioFadeOut(2),
+                    ]
+                )
             )
 
         tracks = [track for track in (audio_clip, bgm_clip) if track is not None]
         if tracks:
-            mixed = CompositeAudioClip(tracks)
-            video_clip = video_clip.with_audio(mixed)
+            mixed = clips.enter_context(CompositeAudioClip(tracks))
+            video_clip = clips.enter_context(video_clip.with_audio(mixed))
 
-        video_path = os.path.join(output_dir, "cardnews.mp4")
         video_clip.write_videofile(
             video_path,
             fps=24,
@@ -118,10 +136,6 @@ def render_card_news(
             temp_audiofile_path=output_dir,
             logger=None,
         )
-    finally:
-        for closable in (mixed, bgm_clip, audio_clip, video_clip):
-            if closable is not None:
-                closable.close()
 
     duration = sum(durations)
     logger.success(
