@@ -40,11 +40,11 @@ class TestTheOldNameIsGone(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
             except (UnicodeError, OSError):
                 continue
-            for match in OLD_NAME.finditer(text):
-                window = text[max(0, match.start() - 40) : match.end() + 20]
-                if not any(marker in window for marker in UPSTREAM):
-                    line = text[: match.start()].count("\n") + 1
-                    offenders.append(f"{path.relative_to(ROOT)}:{line}")
+            # 줄 단위로 본다. 좁은 창으로 보면 `[MoneyPrinterTurbo](https://...)`
+            # 처럼 이름 뒤에 주소가 오는 링크를 놓친다.
+            for number, line in enumerate(text.splitlines(), start=1):
+                if OLD_NAME.search(line) and not any(m in line for m in UPSTREAM):
+                    offenders.append(f"{path.relative_to(ROOT)}:{number}")
 
         self.assertEqual(offenders, [], f"옛 이름이 남아 있다: {offenders}")
 
@@ -91,6 +91,29 @@ class TestOneIdentity(unittest.TestCase):
                 if "ghcr.io/" in line:
                     with self.subTest(file=name, line=line.strip()):
                         self.assertIn("ghcr.io/raidostar/", line)
+
+
+class TestOperationalLinksPointHere(unittest.TestCase):
+    """설치와 신고는 이 포크로 와야 한다. 출처 표기와는 다른 문제다."""
+
+    def test_the_skill_installer_downloads_this_fork(self):
+        """
+        업스트림 아카이브를 shipcast 라는 이름으로 설치하면, 여기서 한 보안 수정과
+        기능이 빠진 코드를 쓰게 된다.
+        """
+        source = (ROOT / "docs/skill/mpt_agent.py").read_text(encoding="utf-8")
+        for line in source.splitlines():
+            if "archive/refs/heads" in line:
+                with self.subTest(line=line.strip()):
+                    self.assertIn("raidostar/", line)
+
+    def test_the_bug_report_link_points_here(self):
+        """포크에서 난 문제를 원본 저장소에 신고하게 두면 안 된다."""
+        main = (ROOT / "webui/Main.py").read_text(encoding="utf-8")
+        for line in main.splitlines():
+            if "github.com" in line and "issues" in line:
+                with self.subTest(line=line.strip()):
+                    self.assertIn("raidostar/", line)
 
 
 if __name__ == "__main__":

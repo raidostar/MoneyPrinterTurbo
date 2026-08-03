@@ -424,7 +424,7 @@ ulimit -n 10240    # 상향
 
 ## 만든 것에 대해
 
-[shipcast](https://github.com/harry0703/MoneyPrinterTurbo) 에서 갈라져 나왔습니다.
+[MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) 에서 갈라져 나왔습니다.
 영상 파이프라인, TTS, 자막, 합성은 그쪽 코드가 바탕입니다.
 
 이 저장소에서 달라진 것: 한국어화, API 인증, 한글 자막 글꼴, 쇼츠 카드 레이아웃,

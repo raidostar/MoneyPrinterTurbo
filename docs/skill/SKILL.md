@@ -37,7 +37,7 @@ This is required on Windows because some agent terminal validators remove backsl
 If the client loaded only the remote `SKILL.md`, download the helper from the official repository to a temporary directory, then use that temporary directory as the command working directory:
 
 ```text
-https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/mpt_agent.py
+https://raw.githubusercontent.com/raidostar/MoneyPrinterTurbo/main/docs/skill/mpt_agent.py
 ```
 
 ### 2. Run the helper

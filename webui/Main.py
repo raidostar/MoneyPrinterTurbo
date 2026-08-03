@@ -57,11 +57,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Report a bug": "https://github.com/harry0703/MoneyPrinterTurbo/issues",
+        "Report a bug": "https://github.com/raidostar/MoneyPrinterTurbo/issues",
         "About": "# shipcast\nSimply provide a topic or keyword for a video, and it will "
         "automatically generate the video copy, video materials, video subtitles, "
         "and video background music before synthesizing a high-definition short "
-        "video.\n\nhttps://github.com/harry0703/MoneyPrinterTurbo",
+        "video.\n\nhttps://github.com/raidostar/MoneyPrinterTurbo",
     },
 )
 
@@ -1138,7 +1138,7 @@ def _render_brand(available_update: str | None = None):
         <h1 class="mpt-brand">
             <span class="mpt-brand__name">shipcast</span>
             <a class="mpt-brand__version"
-               href="https://github.com/harry0703/MoneyPrinterTurbo"
+               href="https://github.com/raidostar/MoneyPrinterTurbo"
                target="_blank"
                rel="noopener noreferrer"
                aria-label="Open shipcast on GitHub"
