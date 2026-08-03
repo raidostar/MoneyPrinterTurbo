@@ -1008,9 +1008,11 @@ MAX_JUDGEMENT_REASON_LENGTH = 24
 MAX_JUDGEMENT_RESPONSE_CHARS = 10_000
 # 완성도는 여기서 묻지 않는다. 저장소에서 세는 값이라 모델의 인상보다 정확하다.
 JUDGEMENT_KEYS = ("entry", "novelty", "reach")
+# 라벨은 점수가 올라가는 방향과 같아야 한다. "진입장벽 5점" 은 한 줄로 설치되는
+# 도구에 붙었을 때 뜻이 정반대로 읽힌다.
 JUDGEMENT_LABELS = {
     "maturity": "완성도",
-    "entry": "진입장벽",
+    "entry": "바로 쓰기",
     "novelty": "새로움",
     "reach": "쓸 자리",
 }

@@ -311,7 +311,7 @@ class TestScoreCard(unittest.TestCase):
         labels = [score.label for score in script.cards[-1].scores]
 
         self.assertNotIn("완성도", labels)
-        self.assertEqual(labels, ["진입장벽", "쓸 자리"])
+        self.assertEqual(labels, ["바로 쓰기", "쓸 자리"])
 
     def test_one_lonely_score_is_not_a_score_card(self):
         """비교할 것이 없는 막대 하나는 판정이 아니라 장식이다."""
@@ -382,3 +382,29 @@ class TestScriptStaysPaired(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScoreLabelsReadTheRightWay(unittest.TestCase):
+    """
+    라벨은 점수가 올라가는 방향과 같아야 한다. "진입장벽 5점" 은 한 줄로 설치되는
+    도구에 붙었을 때 뜻이 정반대로 읽힌다.
+    """
+
+    def test_every_axis_is_named_so_that_more_is_better(self):
+        from app.services import llm as llm_module
+
+        # 장벽·난이도·비용처럼 "높을수록 나쁜" 말이 라벨에 들어가면, 5점이 칭찬이
+        # 아니라 흠으로 읽힌다.
+        backwards = ("장벽", "난이도", "비용", "부담", "제약")
+        for key, label in llm_module.JUDGEMENT_LABELS.items():
+            with self.subTest(key=key):
+                for word in backwards:
+                    self.assertNotIn(word, label)
+
+    def test_every_axis_the_model_scores_has_a_label(self):
+        """라벨이 없으면 그 칸은 이름 없이 막대만 그려진다."""
+        from app.services import llm as llm_module
+
+        for key in llm_module.JUDGEMENT_KEYS:
+            self.assertTrue(llm_module.JUDGEMENT_LABELS.get(key))
+        self.assertTrue(llm_module.JUDGEMENT_LABELS.get("maturity"))

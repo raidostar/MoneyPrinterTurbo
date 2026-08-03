@@ -314,6 +314,40 @@ class TestGithub(unittest.TestCase):
                     self.assertNotIn("api.github.com", fetch.get.call_args.args[0])
 
 
+class TestGithubToken(unittest.TestCase):
+    """
+    토큰은 GitHub API 에만 보낸다. 리다이렉트를 따라가다 다른 곳에 그대로 보내면,
+    남의 서버가 302 한 번으로 토큰을 받아 간다.
+    """
+
+    def _headers(self, url, token="ghp_secret", responses=None):
+        with patch.object(enrich, "_github_token", return_value=token):
+            with _Fetch(responses or [_response("글")]) as fetch:
+                enrich._get(url)
+            return [call.kwargs["headers"] for call in fetch.get.call_args_list]
+
+    def test_the_token_goes_to_the_github_api(self):
+        sent = self._headers("https://api.github.com/repos/a/b")[0]
+        self.assertEqual(sent["Authorization"], "Bearer ghp_secret")
+
+    def test_no_token_means_no_header(self):
+        sent = self._headers("https://api.github.com/repos/a/b", token="")[0]
+        self.assertNotIn("Authorization", sent)
+
+    def test_another_host_never_sees_it(self):
+        sent = self._headers("https://example.test/page")[0]
+        self.assertNotIn("Authorization", sent)
+
+    def test_a_redirect_off_github_drops_it(self):
+        """남의 서버가 302 한 번으로 토큰을 받아 가면 안 된다."""
+        sent = self._headers(
+            "https://api.github.com/repos/a/b",
+            responses=[_response(location="https://evil.test/collect"), _response("글")],
+        )
+        self.assertIn("Authorization", sent[0])
+        self.assertNotIn("Authorization", sent[1])
+
+
 class TestGetJson(unittest.TestCase):
     """API 응답도 밖에서 온다. 본문 읽기와 같은 검사를 거쳐야 한다."""
 

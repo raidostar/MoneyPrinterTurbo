@@ -227,6 +227,24 @@ class TestMaturity(unittest.TestCase):
         self.assertLess(score, repo.MAX_SCORE)
         self.assertIn("주차", reason)
 
+    def test_new_projects_do_not_all_land_on_the_same_number(self):
+        """
+        여기 오는 소재는 대부분 이번 달에 나온 것이다. 신생이라고 상한으로 누르면
+        테스트·CI·라이선스가 다 있는 저장소와 하나 빠진 저장소가 똑같은 점수를
+        받아, 정작 갈라야 할 무리에서 점수가 뭉친다.
+        """
+        new = {"age_days": 9, "idle_days": 0}
+        everything = self._score(**new)[0]
+        no_ci = self._score(has_ci=False, **new)[0]
+        no_license = self._score(license_name="", **new)[0]
+        nothing = self._score(
+            has_tests=False, has_ci=False, license_name="", **new
+        )[0]
+
+        self.assertGreater(everything, no_ci)
+        self.assertGreater(everything, no_license)
+        self.assertGreater(no_ci, nothing)
+
     def test_a_repository_that_stopped_scores_lower(self):
         moving = self._score(idle_days=3)[0]
         stopped = self._score(idle_days=400)[0]

@@ -257,6 +257,20 @@ max_concurrent_tasks = 5
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------
+# GitHub / 저장소 살펴보기
+# -----------------------------------------------------------------------------
+
+# Card news reads the linked repository — tests, CI, licence, last commit — to
+# score how finished it is. That takes three API calls per candidate, and
+# GitHub allows 60 an hour without a token. One daily run fits; re-running a
+# few times does not, and the score card is then left out rather than guessed.
+#
+# A token with no scopes at all raises the limit to 5000/hour. Create one at
+# https://github.com/settings/tokens (classic, no boxes ticked) — it only needs
+# to read what is already public.
+github_token = ""
+
+# -----------------------------------------------------------------------------
 # Cross-platform Publishing / 플랫폼 자동 업로드
 # -----------------------------------------------------------------------------
 

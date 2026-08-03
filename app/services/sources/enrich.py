@@ -25,6 +25,7 @@ from app.services.sources.base import MAX_TEXT_LENGTH, SourceItem
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 512 * 1024
 MAX_REDIRECTS = 3
+GITHUB_API_HOST = "api.github.com"
 GITHUB_README = "https://api.github.com/repos/{owner}/{repo}/readme"
 # 이 헤더가 없으면 GitHub 은 base64 를 담은 JSON 을 준다. 읽을 글이 필요하다.
 GITHUB_RAW_ACCEPT = "application/vnd.github.raw"
@@ -151,6 +152,18 @@ def _pinned_session(url: str, hostname: str, address: str) -> requests.Session:
     return session
 
 
+def _github_token() -> str:
+    """
+    GitHub API 토큰. 없으면 빈 문자열.
+
+    없어도 돈다. 비인증은 시간당 60번이라 하루 한 번 도는 데는 모자라지 않지만,
+    후보 다섯 건에 열다섯 번을 쓰므로 몇 번 다시 돌리면 바닥난다.
+    """
+    from app.config import config
+
+    return str(config.app.get("github_token", "") or "").strip()
+
+
 def _get(url: str, accept: str = "", limit: int = MAX_BODY_BYTES) -> str:
     """
     주소 하나를 읽어 본문을 돌려준다. 못 읽으면 빈 문자열.
@@ -162,15 +175,24 @@ def _get(url: str, accept: str = "", limit: int = MAX_BODY_BYTES) -> str:
     if accept:
         headers["Accept"] = accept
 
+    token = _github_token()
+
     for _ in range(MAX_REDIRECTS + 1):
+        request_headers = {**headers, "Host": ""}
+        # 토큰은 GitHub API 에만 보낸다. 매번 다시 본다 — 리다이렉트를 따라가다
+        # 다른 곳에 그대로 보내면 남의 서버가 302 한 번으로 토큰을 받아 간다.
+        if token and urlparse(url).netloc.lower() == GITHUB_API_HOST:
+            request_headers["Authorization"] = f"Bearer {token}"
+
         try:
             hostname, address = resolve_public_url(url)
+            request_headers["Host"] = hostname
             response = _pinned_session(url, hostname, address).get(
                 url,
                 timeout=REQUEST_TIMEOUT_SECONDS,
                 stream=True,
                 allow_redirects=False,
-                headers={**headers, "Host": hostname},
+                headers=request_headers,
             )
         except UnsafeUrl as exc:
             logger.warning(f"refusing to read a source body: {exc}")

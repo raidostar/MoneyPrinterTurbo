@@ -277,12 +277,15 @@ def maturity(signals: RepoSignals) -> tuple[int, str] | None:
         limits.append(f"{signals.idle_days}일째 조용")
 
     # 만든 지 얼마 안 됐으면 위의 신호가 다 있어도 아직 검증된 물건은 아니다.
+    #
+    # 상한으로 누르지 않고 한 점을 뺀다. 여기 오는 소재는 대부분 이번 달에 나온
+    # 것이라, 상한을 걸면 테스트·CI·라이선스가 다 있는 저장소와 하나 빠진 저장소가
+    # 똑같이 4점이 된다. 정작 갈라야 할 무리에서 점수가 뭉친다.
     if signals.age_days is not None and signals.age_days < 30:
-        score = min(score, MAX_SCORE - 1)
+        score -= 1
         limits.append(f"{max(1, signals.age_days // 7)}주차")
 
-    # 신호를 더 넣으면 여기서 MAX_SCORE 를 넘는다. 범위는 시험이 지킨다.
-    return score, " · ".join((limits + haves)[:3])
+    return max(MIN_SCORE, min(score, MAX_SCORE)), " · ".join((limits + haves)[:3])
 
 
 def summary_line(signals: RepoSignals) -> str:

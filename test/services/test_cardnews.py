@@ -249,7 +249,7 @@ class TestScoreCard(unittest.TestCase):
         image = self._render(
             [
                 cardnews.Score("완성도", 4, "테스트 있음"),
-                cardnews.Score("진입장벽", 5, "cargo install 한 줄"),
+                cardnews.Score("바로 쓰기", 5, "cargo install 한 줄"),
                 cardnews.Score("새로움", 3, "대안 있음"),
                 cardnews.Score("쓸 자리", 2, "Linux ARM 한정"),
             ]
