@@ -64,6 +64,40 @@ class TestGeneration(unittest.TestCase):
         payload = {"cards": [{"bullets": ["하나"], "narration": "읽을 말"}]}
         self.assertEqual(self._generate([json.dumps(payload)] * llm._max_retries), [])
 
+    def test_a_field_that_is_not_a_string_does_not_raise(self):
+        """
+        모델이 숫자나 객체를 넣어 보낼 수 있다. 그대로 길이 제한 함수에 넘기면
+        예외가 재시도 루프 밖으로 튀어, 빈 목록을 돌려준다는 약속이 깨진다.
+        """
+        broken = {
+            "cards": [
+                {"title": 123, "bullets": ["하나"], "narration": "말"},
+                {"title": "제목", "bullets": [456, {"x": 1}], "narration": None},
+                {"title": {"nested": True}, "bullets": "목록아님", "narration": []},
+            ]
+        }
+        # 예외 없이 끝나야 하고, 쓸 수 있는 카드가 모자라면 빈 목록이다.
+        self.assertEqual(
+            self._generate([json.dumps(broken)] * llm._max_retries), []
+        )
+
+    def test_a_usable_card_survives_alongside_broken_ones(self):
+        """멀쩡한 카드까지 같이 버리면 안 된다."""
+        mixed = {
+            "cards": [
+                {"title": 123},
+                {"title": "제목 1", "bullets": [456, "둘"], "narration": "말"},
+                {"title": "제목 2", "bullets": ["하나"], "narration": 789},
+                {"title": "제목 3", "bullets": ["하나"], "narration": "말"},
+            ]
+        }
+        cards = self._generate(json.dumps(mixed))
+
+        self.assertEqual([c["title"] for c in cards], ["제목 1", "제목 2", "제목 3"])
+        self.assertEqual(cards[0]["bullets"], ["둘"])
+        # 나레이션이 문자열이 아니면 제목으로 대신한다.
+        self.assertEqual(cards[1]["narration"], "제목 2")
+
     def test_narration_falls_back_to_the_title(self):
         """나레이션이 비면 그 카드에서 아무 말도 하지 않고 넘어간다."""
         payload = {

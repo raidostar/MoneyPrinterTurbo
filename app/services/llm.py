@@ -998,7 +998,13 @@ def _card_entry(entry) -> dict | None:
     if not isinstance(entry, dict):
         return None
 
-    title = _limit_social_text(entry.get("title"), MAX_CARD_TITLE_LENGTH, "card title")
+    # 모델이 숫자나 객체를 넣어 보낼 수 있다. 문자열이 아닌 값을 길이 제한 함수에
+    # 그대로 넘기면 AttributeError 가 재시도 루프 밖으로 튀어, 빈 목록을 돌려준다는
+    # 약속이 깨진다.
+    def _text(value, limit: int, field: str) -> str:
+        return _limit_social_text(value, limit, field) if isinstance(value, str) else ""
+
+    title = _text(entry.get("title"), MAX_CARD_TITLE_LENGTH, "card title")
     if not title:
         return None
 
@@ -1006,14 +1012,14 @@ def _card_entry(entry) -> dict | None:
     bullets = []
     if isinstance(raw_bullets, list):
         for bullet in raw_bullets[:MAX_CARD_BULLETS]:
-            value = _limit_social_text(bullet, MAX_CARD_BULLET_LENGTH, "card bullet")
+            value = _text(bullet, MAX_CARD_BULLET_LENGTH, "card bullet")
             if value:
                 bullets.append(value)
 
     return {
         "title": title,
         "bullets": bullets,
-        "narration": _limit_social_text(
+        "narration": _text(
             entry.get("narration"), MAX_CARD_NARRATION_LENGTH, "card narration"
         )
         or title,
