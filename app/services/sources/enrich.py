@@ -10,6 +10,7 @@
 """
 
 import ipaddress
+import json
 import re
 import socket
 from dataclasses import replace
@@ -127,7 +128,7 @@ class _PinnedAdapter(requests.adapters.HTTPAdapter):
         return host_params, pool_kwargs
 
 
-def _read_bounded_text(response) -> str:
+def _read_bounded_text(response, limit: int = MAX_BODY_BYTES) -> str:
     """본문을 상한까지만 읽는다. 읽을 글이 아니면 빈 문자열."""
     content_type = str(response.headers.get("Content-Type", "")).lower()
     # 종류를 밝히지 않은 응답도 여기서 걸린다. 무엇인지 모르는 바이트를 글자로
@@ -136,7 +137,7 @@ def _read_bounded_text(response) -> str:
         logger.info(f"skipping a body of an unusable type: {content_type[:60] or '(none)'}")
         return ""
 
-    raw = response.raw.read(MAX_BODY_BYTES, decode_content=True)
+    raw = response.raw.read(max(1, int(limit)), decode_content=True)
     return raw.decode("utf-8", errors="replace")
 
 
@@ -150,7 +151,7 @@ def _pinned_session(url: str, hostname: str, address: str) -> requests.Session:
     return session
 
 
-def _get(url: str, accept: str = "") -> str:
+def _get(url: str, accept: str = "", limit: int = MAX_BODY_BYTES) -> str:
     """
     주소 하나를 읽어 본문을 돌려준다. 못 읽으면 빈 문자열.
 
@@ -193,13 +194,30 @@ def _get(url: str, accept: str = "") -> str:
             if response.status_code >= 400:
                 logger.info(f"a source body responded {response.status_code}")
                 return ""
-            return _read_bounded_text(response)
+            return _read_bounded_text(response, limit)
 
     logger.warning("too many redirects while reading a source body")
     return ""
 
 
-def _github_repo(url: str) -> tuple[str, str] | None:
+def get_json(url: str, accept: str = "", limit: int = MAX_BODY_BYTES):
+    """
+    주소 하나를 읽어 JSON 으로 만든다. 못 읽거나 JSON 이 아니면 ``None``.
+
+    본문 읽기와 같은 길을 쓴다 — 공인 주소 확인, 확인한 주소로 연결, 리다이렉트
+    재검사, 크기 상한이 그대로 걸린다.
+    """
+    raw = _get(url, accept=accept, limit=limit)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        logger.info("a source returned something that is not json")
+        return None
+
+
+def github_repo(url: str) -> tuple[str, str] | None:
     """
     GitHub 저장소 첫 화면이면 ``(owner, repo)``. 아니면 ``None``.
 
@@ -244,7 +262,7 @@ def fetch_body(url: str, limit: int = MAX_TEXT_LENGTH) -> str:
     if not url:
         return ""
 
-    repository = _github_repo(url)
+    repository = github_repo(url)
     if repository:
         owner, repo = repository
         body = _get(
