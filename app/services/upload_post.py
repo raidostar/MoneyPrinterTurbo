@@ -3,12 +3,16 @@ Upload-Post API integration for cross-posting videos to TikTok, Instagram and Yo
 
 Docs: https://docs.upload-post.com
 """
+import json
 import os
 from typing import Optional
 
 import requests
 from loguru import logger
 from app.config import config
+
+# 응답도 외부 입력이다. 통째로 메모리에 올리기 전에 크기를 끊는다.
+MAX_RESPONSE_BYTES = 1024 * 1024
 
 
 class UploadPostService:
@@ -28,6 +32,25 @@ class UploadPostService:
     def _can_upload(self, username: str) -> bool:
         """키와 올릴 프로필이 있고 켜져 있는지. 프로필은 채널마다 다를 수 있다."""
         return bool(self.api_key and username and self.enabled)
+
+    def _read_result(self, response) -> dict:
+        """
+        응답 본문을 상한까지만 읽어 딕셔너리로 만든다. 못 읽으면 실패로 본다.
+
+        응답은 외부 입력이다. 통째로 올려 파싱하면 거대한 본문 하나에 흔들리고,
+        JSON 이 아닐 때 나는 예외는 아래 `RequestException` 에 걸리지 않아 부르는
+        쪽으로 그대로 새어 나간다.
+        """
+        raw = response.raw.read(MAX_RESPONSE_BYTES + 1, decode_content=True)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            return {"success": False, "error": "Upload-Post returned an oversized body"}
+        try:
+            result = json.loads(raw)
+        except ValueError:
+            return {"success": False, "error": "Upload-Post returned a body we cannot read"}
+        if not isinstance(result, dict):
+            return {"success": False, "error": "Upload-Post returned an unexpected body"}
+        return result
 
     def upload_video(
         self,
@@ -90,10 +113,11 @@ class UploadPostService:
                     data=data,
                     files=files,
                     timeout=300,
+                    stream=True,
                 )
 
                 response.raise_for_status()
-                result = response.json()
+                result = self._read_result(response)
 
                 if result.get('success'):
                     logger.info(f"✅ Video cross-posted successfully! Request ID: {result.get('request_id')}")

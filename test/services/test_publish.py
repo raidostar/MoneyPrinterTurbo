@@ -160,23 +160,122 @@ class TestPublish(unittest.TestCase):
         call.assert_not_called()
 
     def test_a_transport_that_raises_does_not_escape(self):
-        """업로드가 안 됐다고 이미 만들어 둔 영상까지 실패로 만들 이유가 없다."""
+        """
+        전송 계층은 실패를 반환값으로 알리기로 되어 있지만 그것까지 보장하지는
+        않는다. 여기서 새면 영상을 보내는 자리에서 봇이 죽는다.
+        """
         with _config():
             with patch.object(
                 publish.upload_post,
                 "cross_post_video",
-                return_value={"success": False, "error": "boom"},
+                side_effect=RuntimeError("boom"),
             ):
                 result = publish.publish(publish.CARD_NEWS, self.video, "제목")
         self.assertFalse(result.ok)
-        self.assertIn("boom", result.error)
+        # 못 올렸으니 다시 시도할 수 있어야 한다.
+        self.assertFalse(publish.already_published(self.video))
 
     def test_a_response_that_is_not_a_dictionary_is_a_failure(self):
         result, _ = self._publish(sent="nope")
         self.assertFalse(result.ok)
 
+    def test_a_provider_error_is_sanitized_before_it_is_shown(self):
+        """
+        오류 문구는 남의 서버가 적어 보낸 값이고, 그대로 텔레그램으로 나간다.
+        자격 증명이 붙은 주소가 섞여 있으면 그게 화면과 기록에 남는다.
+        """
+        leak = "failed to reach https://user:hunter2@upload.test/api?api_key=SECRET42"
+        result, _ = self._publish(sent={"success": False, "error": leak})
+
+        self.assertFalse(result.ok)
+        self.assertNotIn("hunter2", result.error)
+        self.assertNotIn("SECRET42", result.error)
+
+    def test_a_long_provider_error_is_cut(self):
+        result, _ = self._publish(sent={"success": False, "error": "x" * 5000})
+        self.assertLessEqual(len(result.error), publish.MAX_ERROR_LENGTH)
+
+    def test_only_the_request_id_is_kept_from_the_response(self):
+        """응답을 통째로 담으면 그 안에 무엇이 들었는지 모른 채 흘러다닌다."""
+        result, _ = self._publish(
+            sent={"success": True, "request_id": "r" * 5000, "secret": "shh"}
+        )
+        self.assertLessEqual(len(result.request_id), publish.MAX_REQUEST_ID_LENGTH)
+        self.assertNotIn("shh", str(result))
+
+
+class TestNotTwice(unittest.TestCase):
+    """
+    같은 영상을 두 번 올리면 되돌릴 수 없다. 지우는 것보다 손으로 한 번 더 올리는
+    편이 쉬우므로, 애매하면 올리지 않는 쪽으로 틀린다.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.video = os.path.join(self.directory.name, "cardnews.mp4")
+        with open(self.video, "wb") as handle:
+            handle.write(b"video")
+
+    def test_the_claim_is_taken_before_the_upload_starts(self):
+        """
+        보내고 나서 기록하면 늦다. 그 사이에 다시 부르면 둘 다 아직 안 올렸다고
+        보고 같은 영상을 두 번 올린다.
+        """
+        seen = {}
+
+        def _send(**_kwargs):
+            seen["claimed_during_upload"] = publish.already_published(self.video)
+            return {"success": True, "request_id": "r-1"}
+
+        with _config():
+            with patch.object(publish.upload_post, "cross_post_video", side_effect=_send):
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+        self.assertTrue(seen["claimed_during_upload"])
+
+    def test_dying_mid_upload_does_not_let_it_go_out_again(self):
+        """올라갔는지 모르는 영상은 안 올리는 쪽이 낫다."""
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                side_effect=KeyboardInterrupt(),
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+            with patch.object(publish.upload_post, "cross_post_video") as call:
+                result = publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+        self.assertEqual(result.skipped, "already published")
+        call.assert_not_called()
+
+    def test_a_receipt_that_could_not_be_written_still_blocks_a_second_upload(self):
+        """내용을 못 적어도 자리는 이미 잡혀 있어야 한다."""
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                return_value={"success": True, "request_id": "r-1"},
+            ):
+                with patch.object(publish, "_write_receipt"):
+                    publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+            with patch.object(publish.upload_post, "cross_post_video") as call:
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
+
+        call.assert_not_called()
+
     def test_the_receipt_says_where_it_went(self):
-        self._publish()
+        with _config():
+            with patch.object(
+                publish.upload_post,
+                "cross_post_video",
+                return_value={"success": True, "request_id": "r-1"},
+            ):
+                publish.publish(publish.CARD_NEWS, self.video, "제목")
+
         with open(f"{self.video}{publish.RECEIPT_SUFFIX}", encoding="utf-8") as handle:
             receipt = json.load(handle)
         self.assertEqual(receipt["profile"], "cardnews-profile")

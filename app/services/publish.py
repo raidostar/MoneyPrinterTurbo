@@ -11,12 +11,12 @@
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from loguru import logger
 
 from app.config import config
-from app.services import upload_post
+from app.services import llm, upload_post
 
 CARD_NEWS = "cardnews"
 SHORTS = "shorts"
@@ -49,6 +49,10 @@ KNOWN_PLATFORMS = frozenset(
 RECEIPT_SUFFIX = ".published.json"
 MAX_TITLE_LENGTH = 100
 MAX_DESCRIPTION_LENGTH = 2200
+# 응답에서 남기는 값들의 상한. 남의 서버가 적어 보내는 문자열이 그대로 기록과
+# 화면으로 간다.
+MAX_ERROR_LENGTH = 300
+MAX_REQUEST_ID_LENGTH = 100
 
 
 @dataclass(frozen=True)
@@ -63,13 +67,18 @@ class PublishTarget:
 
 @dataclass(frozen=True)
 class PublishResult:
-    """올린 결과. ``platforms`` 는 실제로 보낸 곳이다."""
+    """
+    올린 결과. ``platforms`` 는 실제로 보낸 곳이다.
+
+    응답을 통째로 담지 않는다. 남의 서버가 돌려준 것이 그대로 기록과 화면으로
+    흘러가면, 그 안에 무엇이 들었는지 아무도 모른 채 남는다.
+    """
 
     ok: bool
     platforms: tuple[str, ...] = ()
     error: str = ""
     skipped: str = ""
-    detail: dict = field(default_factory=dict)
+    request_id: str = ""
 
 
 def _setting(prefix: str, name: str, default=None):
@@ -137,8 +146,40 @@ def _receipt_path(video_path: str) -> str:
 
 
 def already_published(video_path: str) -> bool:
-    """이미 올린 영상인지. 영수증 파일이 옆에 있으면 올린 것이다."""
+    """이미 올렸거나 올리는 중인 영상인지."""
     return os.path.exists(_receipt_path(video_path))
+
+
+def _claim(video_path: str) -> bool:
+    """
+    올리기 전에 자리를 잡는다. 이미 누가 잡았으면 ``False``.
+
+    보내고 나서 기록하면 늦다. 두 곳에서 동시에 부르면 둘 다 "아직 안 올렸다" 를
+    보고 같은 영상을 두 번 올린다. 되돌릴 수 없는 쪽으로 틀리는 것이므로, 먼저
+    자리를 잡고 보낸다. 파일 만들기 자체가 원자적이라 둘 중 하나만 성공한다.
+
+    보내다 죽으면 이 표시가 남아 다시 올라가지 않는다. 올라갔는지 모르는 영상은
+    안 올리는 쪽이 낫다 — 지우는 것보다 손으로 한 번 더 올리는 편이 쉽다.
+    """
+    try:
+        handle = os.open(
+            _receipt_path(video_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+        )
+    except FileExistsError:
+        return False
+    except OSError as exc:
+        logger.warning(f"could not claim the upload: {type(exc).__name__}")
+        return False
+    os.close(handle)
+    return True
+
+
+def _release(video_path: str) -> None:
+    """올리지 못했으면 잡아 둔 자리를 놓는다. 그래야 다시 시도할 수 있다."""
+    try:
+        os.remove(_receipt_path(video_path))
+    except OSError as exc:
+        logger.warning(f"could not release the upload claim: {type(exc).__name__}")
 
 
 def _write_receipt(video_path: str, payload: dict) -> None:
@@ -146,7 +187,8 @@ def _write_receipt(video_path: str, payload: dict) -> None:
     올렸다는 사실을 영상 옆에 남긴다.
 
     남기지 못해도 올린 것 자체는 성공이다. 예외를 올리면 이미 나간 영상을
-    실패로 보고하게 되고, 부르는 쪽이 다시 올린다.
+    실패로 보고하게 되고, 부르는 쪽이 다시 올린다. 자리는 이미 잡아 두었으므로
+    내용을 못 적어도 두 번 올라가지는 않는다.
     """
     try:
         with open(_receipt_path(video_path), "w", encoding="utf-8") as handle:
@@ -186,16 +228,16 @@ def publish(
     if not os.path.exists(video_path):
         return PublishResult(ok=False, error="the video file is gone")
 
-    if already_published(video_path):
-        # 버튼을 두 번 누르거나 봇을 다시 켜면 같은 영상이 또 올라간다.
-        logger.info(f"already published, skipping: {os.path.basename(video_path)}")
-        return PublishResult(ok=True, skipped="already published")
-
     title = " ".join(str(title or "").split())[:MAX_TITLE_LENGTH]
     description = str(description or "").strip()[:MAX_DESCRIPTION_LENGTH]
     if not title:
         # YouTube 는 제목이 없으면 받지 않는다.
         return PublishResult(ok=False, error="a title is required")
+
+    if not _claim(video_path):
+        # 버튼을 두 번 누르거나 봇을 다시 켜면 같은 영상이 또 올라간다.
+        logger.info(f"already published, skipping: {os.path.basename(video_path)}")
+        return PublishResult(ok=True, skipped="already published")
 
     youtube_extra = None
     if "youtube" in target.platforms:
@@ -210,24 +252,44 @@ def publish(
         f"publishing to {target.channel}: {', '.join(target.platforms)} "
         f"as {target.profile}"
     )
-    response = upload_post.cross_post_video(
-        video_path=video_path,
-        title=title,
-        platforms=list(target.platforms),
-        youtube_extra=youtube_extra,
-        username=target.profile,
-        extra_fields=_disclosure(target.platforms),
-    )
+    try:
+        response = upload_post.cross_post_video(
+            video_path=video_path,
+            title=title,
+            platforms=list(target.platforms),
+            youtube_extra=youtube_extra,
+            username=target.profile,
+            extra_fields=_disclosure(target.platforms),
+        )
+    except Exception as exc:
+        # 전송 계층은 실패를 반환값으로 알리기로 되어 있지만, 응답 파싱이나 파일
+        # 읽기에서 나는 예외까지 전부 막아 주지는 않는다. 여기서 새면 이미 만들어
+        # 둔 영상을 보내는 자리에서 봇이 죽는다.
+        logger.warning(f"publish raised: {type(exc).__name__}")
+        _release(video_path)
+        return PublishResult(
+            ok=False,
+            platforms=target.platforms,
+            error=llm.sanitize_error_message(exc)[:MAX_ERROR_LENGTH],
+        )
+
     if not isinstance(response, dict):
         response = {"success": False, "error": "upload-post returned nothing usable"}
 
     if not response.get("success"):
-        error = str(
+        # 오류 문구는 남의 서버가 적어 보낸 값이다. 그대로 기록과 화면으로 보내면
+        # 자격 증명이 붙은 주소가 섞여 나올 수 있다.
+        error = llm.sanitize_error_message(
             response.get("error") or response.get("message") or "unknown upload error"
         )
-        logger.warning(f"publish failed: {error[:200]}")
-        return PublishResult(ok=False, platforms=target.platforms, error=error[:500])
+        error = " ".join(error.split())[:MAX_ERROR_LENGTH]
+        logger.warning(f"publish failed: {error}")
+        _release(video_path)
+        return PublishResult(ok=False, platforms=target.platforms, error=error)
 
+    request_id = " ".join(str(response.get("request_id", "")).split())[
+        :MAX_REQUEST_ID_LENGTH
+    ]
     _write_receipt(
         video_path,
         {
@@ -235,7 +297,9 @@ def publish(
             "profile": target.profile,
             "platforms": list(target.platforms),
             "title": title,
-            "request_id": str(response.get("request_id", "")),
+            "request_id": request_id,
         },
     )
-    return PublishResult(ok=True, platforms=target.platforms, detail=response)
+    return PublishResult(
+        ok=True, platforms=target.platforms, request_id=request_id
+    )

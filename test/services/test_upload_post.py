@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -20,9 +21,11 @@ _CONFIG_BASE = {
 }
 
 
-def _mock_response(success=True):
+def _mock_response(success=True, body=None):
     r = MagicMock()
-    r.json.return_value = {"success": success, "request_id": "abc123"}
+    if body is None:
+        body = json.dumps({"success": success, "request_id": "abc123"}).encode("utf-8")
+    r.raw.read.return_value = body
     r.raise_for_status = MagicMock()
     return r
 
@@ -102,6 +105,56 @@ class TestChannelProfile(unittest.TestCase):
         )
 
         self.assertEqual(_get(mock_post.call_args[1]["data"], "is_aigc"), "true")
+
+
+class TestResponseIsExternalInput(unittest.TestCase):
+    """
+    응답은 밖에서 온다. 이 함수는 실패를 예외가 아니라 반환값으로 알리기로 되어
+    있는데, 본문 파싱에서 나는 예외는 아래 `RequestException` 에 걸리지 않는다.
+    """
+
+    def _upload(self, body):
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            post.return_value = _mock_response(body=body)
+            return UploadPostService().upload_video("/fake/v.mp4", "T")
+
+    def test_a_body_that_is_not_json_is_a_failure(self):
+        result = self._upload(b"<html>gateway timeout</html>")
+        self.assertFalse(result["success"])
+
+    def test_a_body_that_is_not_an_object_is_a_failure(self):
+        result = self._upload(b'["not", "an", "object"]')
+        self.assertFalse(result["success"])
+
+    def test_an_oversized_body_is_not_parsed(self):
+        """통째로 올려 파싱하면 거대한 본문 하나에 흔들린다."""
+        from app.services.upload_post import MAX_RESPONSE_BYTES
+
+        filler = b" " * (MAX_RESPONSE_BYTES + 10)
+        result = self._upload(b'{"success": true, "note": "' + filler + b'"}')
+        self.assertFalse(result["success"])
+
+    def test_the_body_is_read_up_to_a_limit(self):
+        from app.services.upload_post import MAX_RESPONSE_BYTES
+
+        with (
+            patch("app.services.upload_post.config.app", _CONFIG_BASE),
+            patch("app.services.upload_post.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=b"fake")),
+            patch("app.services.upload_post.requests.post") as post,
+        ):
+            response = _mock_response()
+            post.return_value = response
+            UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        response.raw.read.assert_called_once_with(
+            MAX_RESPONSE_BYTES + 1, decode_content=True
+        )
 
 
 class TestUploadPostService(unittest.TestCase):
