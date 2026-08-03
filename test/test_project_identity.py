@@ -78,7 +78,14 @@ class TestOneIdentity(unittest.TestCase):
         워크플로는 이 저장소의 토큰으로 올린다. 다른 소유자 이름으로 두면 올릴 수도
         없고, 받는 쪽은 없는 이미지를 가리킨다.
         """
-        for name in (".github/workflows/docker-ghcr.yml", "docker-compose.release.yml"):
+        # 문서도 같이 본다. 안내문만 예전 소유자를 가리키면, 따라 하는 사람은
+        # 워크플로가 올리지도 않는 이미지를 받으려 한다.
+        for name in (
+            ".github/workflows/docker-ghcr.yml",
+            "docker-compose.release.yml",
+            "README.md",
+            "README-en.md",
+        ):
             text = self._read(name)
             for line in text.splitlines():
                 if "ghcr.io/" in line:
