@@ -12,8 +12,8 @@ OLD_NAME = re.compile(r"MoneyPrinterTurbo", re.IGNORECASE)
 #  - raidostar/ : GitHub 저장소 주소. 저장소 이름을 바꾸면 기존 클론과 링크가
 #    끊기므로 코드에서 결정할 일이 아니다. 저장소를 옮기면 이 예외를 지운다.
 UPSTREAM = ("harry0703/", "raidostar/", "aff=", "utm_term=")
-SEARCH_SUFFIXES = {".py", ".toml", ".yml", ".yaml", ".json", ".html"}
-SKIP_DIRS = {".git", ".venv", "storage", ".redteam", "__pycache__", "node_modules", "docs"}
+SEARCH_SUFFIXES = {".py", ".toml", ".yml", ".yaml", ".json", ".html", ".lock", ".ipynb", ".md"}
+SKIP_DIRS = {".git", ".venv", "storage", ".redteam", "__pycache__", "node_modules"}
 
 
 def _tracked_files():
@@ -54,6 +54,36 @@ class TestTheOldNameIsGone(unittest.TestCase):
         """
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("harry0703/MoneyPrinterTurbo", readme)
+
+
+class TestOneIdentity(unittest.TestCase):
+    """이름을 바꾸다 보면 설치 안내와 배포 대상이 서로 다른 곳을 가리키게 된다."""
+
+    def _read(self, name):
+        return (ROOT / name).read_text(encoding="utf-8")
+
+    def test_the_clone_url_points_at_a_repository_that_exists(self):
+        """
+        저장소 이름은 GitHub 에서 바꾸지 않았다. 안내문만 새 이름으로 바꾸면
+        따라 하는 사람이 없는 주소를 클론한다.
+        """
+        for name in ("README.md", "README-en.md"):
+            for line in self._read(name).splitlines():
+                if "git clone" in line and "github.com" in line:
+                    with self.subTest(readme=name, line=line.strip()):
+                        self.assertIn("raidostar/MoneyPrinterTurbo", line)
+
+    def test_the_container_image_is_published_under_our_owner(self):
+        """
+        워크플로는 이 저장소의 토큰으로 올린다. 다른 소유자 이름으로 두면 올릴 수도
+        없고, 받는 쪽은 없는 이미지를 가리킨다.
+        """
+        for name in (".github/workflows/docker-ghcr.yml", "docker-compose.release.yml"):
+            text = self._read(name)
+            for line in text.splitlines():
+                if "ghcr.io/" in line:
+                    with self.subTest(file=name, line=line.strip()):
+                        self.assertIn("ghcr.io/raidostar/", line)
 
 
 if __name__ == "__main__":

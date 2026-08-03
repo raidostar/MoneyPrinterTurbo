@@ -144,7 +144,7 @@ python telegram_bot.py
 ### uv 사용 (권장)
 
 ```shell
-git clone https://github.com/raidostar/shipcast.git
+git clone https://github.com/raidostar/MoneyPrinterTurbo.git shipcast
 cd shipcast
 uv python install 3.11
 uv sync --frozen

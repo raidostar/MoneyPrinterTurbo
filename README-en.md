@@ -224,7 +224,7 @@ Use the local setup or Docker instructions below.
 #### ① Clone the Project
 
 ```shell
-git clone https://github.com/harry0703/MoneyPrinterTurbo.git
+git clone https://github.com/raidostar/MoneyPrinterTurbo.git shipcast
 ```
 
 #### ② Configure the Project (Optional)
@@ -265,7 +265,7 @@ Open your browser and visit http://127.0.0.1:8080/docs or http://127.0.0.1:8080/
 Use [uv](https://docs.astral.sh/uv/) to manage the Python environment and dependencies. The project supports Python 3.11 or later; the example below uses Python 3.11.
 
 ```shell
-git clone https://github.com/harry0703/MoneyPrinterTurbo.git
+git clone https://github.com/raidostar/MoneyPrinterTurbo.git shipcast
 cd shipcast
 uv python install 3.11
 uv sync --frozen
