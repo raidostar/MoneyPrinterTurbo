@@ -61,23 +61,17 @@ class TestChannelProfile(unittest.TestCase):
     @patch("app.services.upload_post.os.path.exists", return_value=True)
     @patch("builtins.open", mock_open(read_data=b"fake"))
     @patch("app.services.upload_post.requests.post")
-    def test_a_given_profile_is_the_one_used(self, mock_post, _exists):
+    def test_a_given_profile_replaces_the_configured_one(self, mock_post, _exists):
         mock_post.return_value = _mock_response()
+        service = UploadPostService()
 
-        UploadPostService().upload_video("/fake/v.mp4", "T", username="cardnews")
+        service.upload_video("/fake/v.mp4", "T")
+        without = _get(mock_post.call_args[1]["data"], "user")
+        service.upload_video("/fake/v.mp4", "T", username="cardnews")
+        given = _get(mock_post.call_args[1]["data"], "user")
 
-        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "cardnews")
-
-    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
-    @patch("app.services.upload_post.os.path.exists", return_value=True)
-    @patch("builtins.open", mock_open(read_data=b"fake"))
-    @patch("app.services.upload_post.requests.post")
-    def test_without_one_the_configured_profile_is_used(self, mock_post, _exists):
-        mock_post.return_value = _mock_response()
-
-        UploadPostService().upload_video("/fake/v.mp4", "T")
-
-        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "testuser")
+        self.assertEqual(without, "testuser")
+        self.assertEqual(given, "cardnews")
 
     @patch(
         "app.services.upload_post.config.app",
