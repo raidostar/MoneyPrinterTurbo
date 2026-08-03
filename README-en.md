@@ -1,22 +1,72 @@
 <div align="center">
 
-# shipcast 💸
+# shipcast
 
-### An All-in-One AI Short Video Generator
+### Turn newly shipped dev tools into card-news videos
 
-Provide a video <b>topic</b> or <b>keyword</b>, and shipcast will generate the script, match footage, create subtitles and background music, and produce an HD short video.
+Collects what went up on Hacker News today and makes a Korean card-news vertical
+video out of it. The stock-footage short-video pipeline it grew out of still works.
 
-[![Version](https://img.shields.io/github/v/release/harry0703/MoneyPrinterTurbo?color=blue&label=version)](https://github.com/harry0703/MoneyPrinterTurbo/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/harry0703/MoneyPrinterTurbo/releases/latest)
-[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Downloads](https://img.shields.io/github/downloads/harry0703/MoneyPrinterTurbo/total)](https://github.com/harry0703/MoneyPrinterTurbo/releases/latest)
-
-<a href="https://trendshift.io/repositories/8731" target="_blank"><img src="https://trendshift.io/api/badge/repositories/8731" alt="harry0703%2Fshipcast | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-<a href="https://www.star-history.com/harry0703/shipcast"><img src="https://api.star-history.com/badge?repo=harry0703/MoneyPrinterTurbo" alt="Star History Rank" style="height: 55px;" height="55"/></a>
-
-English | [한국어](README.md) | [Releases](https://github.com/harry0703/MoneyPrinterTurbo/releases) | [Issues](https://github.com/harry0703/MoneyPrinterTurbo/issues)
+English | [한국어](README.md) | [Issues](https://github.com/raidostar/MoneyPrinterTurbo/issues)
 
 </div>
+
+## Card news
+
+```
+Hacker News  →  card script  →  per-card narration  →  vertical video
+  (free API)       (LLM)             (TTS)                 (mp4)
+```
+
+Five or six cards. The first says why it is worth watching, the middle ones take
+one idea each, the last says whether to try it.
+
+**What is on screen is the content.** There is no stock footage to mismatch.
+
+### Two rules
+
+**Everything said about a tool comes from the material.** No invented features,
+benchmarks, prices, or authors. The tool is real and the person who made it will
+see the video.
+
+**Sources are named.** Where it came from and how it did goes on the first and
+last card. This channel is about other people's work.
+
+```python
+from app.models.schema import VideoParams
+from app.services.cardscript import build_card_script
+from app.services.cardvideo import render_card_news
+from app.services.sources import hackernews
+
+items = hackernews.fetch_items(min_points=100, within_hours=48, tags="show_hn")
+script = build_card_script(items[0])
+
+params = VideoParams(video_subject=items[0].title)
+params.voice_name = "ko-KR-HyunsuMultilingualNeural-Male"
+result = render_card_news("my-task", script, params)
+```
+
+Each card is narrated separately, so the measured length of its own audio is how
+long it stays on screen.
+
+## Telegram
+
+Send a subject, approve the draft, get the mp4 back. The bot polls outward, so no
+public address or open port is needed.
+
+```toml
+[telegram]
+bot_token = ""   # /newbot from @BotFather
+chat_id = ""     # leave empty, start the bot, message it, read the id from the log
+```
+
+```shell
+python telegram_bot.py
+```
+
+Only private chats, and only the configured `chat_id`.
+
+## Short videos
 
 ## Screenshots 🖥️
 
@@ -190,7 +240,7 @@ All examples below were generated with shipcast.
 If your AI Agent can read Skill documents and operate a local terminal, send it the prompt below. The Agent will install and configure shipcast, generate the video, and return the video file path. It will ask only for required API keys that are not already configured. This workflow currently supports macOS and Windows.
 
 ```text
-Use this Skill: https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/SKILL.md
+Use this Skill: https://raw.githubusercontent.com/raidostar/MoneyPrinterTurbo/main/docs/skill/SKILL.md
 Create a video with the topic "How AI is changing everyday life."
 ```
 

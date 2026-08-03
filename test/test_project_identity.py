@@ -118,6 +118,34 @@ class TestOperationalLinksPointHere(unittest.TestCase):
                     self.assertIn("raidostar/", line)
 
 
+class TestCodeIsFetchedFromHere(unittest.TestCase):
+    """
+    설치 경로가 원본을 가리키면, 따라 하는 사람은 이 포크의 보안 수정과 기능이
+    빠진 코드를 shipcast 라는 이름으로 돌리게 된다.
+
+    하나씩 잡는 대신 코드를 내려받는 주소 전체를 본다. 데모 이미지처럼 코드가
+    아닌 자산 링크는 대상이 아니다.
+    """
+
+    FETCHES_CODE = re.compile(
+        r"https?://[^\s\"')]*?(?:\.git\b|/archive/refs/|raw\.githubusercontent\.com/[^\s\"')]*)"
+    )
+
+    def test_every_install_url_points_at_this_fork(self):
+        for path in _tracked_files():
+            if path.name == Path(__file__).name:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeError, OSError):
+                continue
+            for url in self.FETCHES_CODE.findall(text):
+                if "github" not in url:
+                    continue
+                with self.subTest(file=str(path.relative_to(ROOT)), url=url):
+                    self.assertIn("raidostar/", url)
+
+
 class TestDocumentedPathsExist(unittest.TestCase):
     def test_every_linked_repository_file_is_there(self):
         """
