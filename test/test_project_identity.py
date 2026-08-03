@@ -126,6 +126,23 @@ class TestOperationalLinksPointHere(unittest.TestCase):
                     self.assertEqual(owner, "raidostar")
 
 
+class TestNoBorrowedNumbers(unittest.TestCase):
+    """다른 저장소의 지표를 이 프로젝트 것처럼 보여주면 안 된다."""
+
+    BADGES = ("star-history.com", "shields.io/github/v/release", "shields.io/github/downloads")
+
+    def test_no_readme_shows_another_repositorys_stats(self):
+        """
+        원본의 별 그래프와 다운로드 수를 그대로 달아 두면, 여기 숫자가 아닌 것을
+        여기 성과로 읽히게 한다.
+        """
+        for name in ("README.md", "README-en.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for badge in self.BADGES:
+                with self.subTest(readme=name, badge=badge):
+                    self.assertNotIn(badge, text)
+
+
 class TestCodeIsFetchedFromHere(unittest.TestCase):
     """
     설치 경로가 원본을 가리키면, 따라 하는 사람은 이 포크의 보안 수정과 기능이
