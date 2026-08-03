@@ -16,7 +16,7 @@ import numpy as np
 from moviepy import AudioFileClip
 
 from app.services import bgm as bgm_service
-from app.services import cardnews, llm, video as video_service, voice
+from app.services import cardnews, llm, task_artifacts, video as video_service, voice
 from app.services.cardscript import CardScript
 from app.utils import file_security, utils
 
@@ -81,8 +81,13 @@ def _narrate(text: str, target_path: str, params) -> float:
         # 않으면, 합성이 조용히 실패했을 때 예전 소리를 새 카드에 붙이게 된다.
         try:
             os.remove(target_path)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError as exc:
+            # 못 지웠다면 이 자리에 옛 파일이 그대로 있다는 뜻이다. 그 상태로
+            # 합성에 들어가면 실패해도 옛 소리가 성공처럼 통과한다.
+            logger.warning(f"could not clear a stale narration: {type(exc).__name__}")
+            return 0.0
         try:
             # 음량은 아래에서 클립에 한 번만 건다. 여기서도 걸면 제공자에 따라 두 번
             # 곱해져, 0.2 를 넣은 사람이 0.04 를 듣게 된다.
@@ -204,6 +209,19 @@ def render_card_news(
         )
 
     duration = sum(durations)
+    # 요청한 카드 수와 실제로 그려진 수, 요청한 나레이션 길이와 실제 노출 시간이
+    # 다를 수 있다. 기록에는 실제 값이 남아야 한다.
+    task_artifacts.patch_script_data(
+        task_id,
+        card_news={
+            "cards": len(script.cards),
+            "durations": [round(value, 3) for value in durations],
+            "silent_cards": [
+                index for index, path in enumerate(narration_paths, start=1) if not path
+            ],
+            "video": video_path,
+        },
+    )
     logger.success(
         f"card news rendered: {video_path}, {len(script.cards)} cards, {duration:.1f}s"
     )

@@ -314,6 +314,35 @@ class TestNarrationRetry(unittest.TestCase):
 
         self.assertEqual(seconds, 0.0, "예전 실행의 소리를 새 카드에 붙였다")
 
+    def test_a_file_that_cannot_be_cleared_is_a_failure(self):
+        """
+        못 지웠다면 옛 파일이 그 자리에 그대로 있다는 뜻이다. 그 상태로 합성에
+        들어가면 실패해도 옛 소리가 성공처럼 통과한다.
+        """
+        with tempfile.TemporaryDirectory() as work:
+            target = os.path.join(work, "card.mp3")
+            open(target, "wb").write(b"old")
+            with (
+                patch.object(cardvideo.os, "remove", side_effect=PermissionError("no")),
+                patch.object(cardvideo.voice, "tts", return_value=object()) as tts,
+                patch.object(cardvideo.voice, "get_audio_duration", return_value=9.0),
+            ):
+                seconds = cardvideo._narrate("말", target, _params())
+
+        self.assertEqual(seconds, 0.0)
+        tts.assert_not_called()
+
+    def test_a_missing_file_is_not_a_failure(self):
+        """처음 만드는 카드는 지울 파일이 없다."""
+        with tempfile.TemporaryDirectory() as work:
+            target = os.path.join(work, "card.mp3")
+            with (
+                patch.object(cardvideo.voice, "tts", return_value=object()),
+                patch.object(cardvideo.voice, "get_audio_duration", return_value=3.0),
+                patch.object(cardvideo.os.path, "exists", return_value=True),
+            ):
+                self.assertEqual(cardvideo._narrate("말", target, _params()), 3.0)
+
     def test_a_failed_synthesis_is_retried(self):
         """일시적인 실패 하나로 그 카드가 조용해지지 않게 한다."""
         params = _params()
@@ -364,6 +393,28 @@ class TestOutput(unittest.TestCase):
         script = CardScript(cards=(), narrations=())
         with _task_dir():
             self.assertIsNone(cardvideo.render_card_news("t", script, _params()))
+
+
+class TestArtifacts(unittest.TestCase):
+    def test_the_rendered_values_are_recorded(self):
+        """
+        요청한 카드 수와 실제로 그려진 수, 요청한 나레이션 길이와 실제 노출 시간이
+        다를 수 있다. 기록에는 실제 값이 남아야 한다.
+        """
+        lengths = iter([2.0, 0.0, 0.2])
+        with (
+            patch.object(cardvideo, "_narrate", side_effect=lambda *a, **k: next(lengths)),
+            patch.object(cardvideo.task_artifacts, "patch_script_data") as patched,
+            _silent_moviepy(5.0),
+        ):
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
+
+        recorded = patched.call_args.kwargs["card_news"]
+        self.assertEqual(recorded["cards"], 3)
+        # 두 번째 카드는 소리 없이 지나갔고, 세 번째는 하한까지 늘어났다.
+        self.assertEqual(recorded["silent_cards"], [2])
+        self.assertEqual(recorded["durations"][2], cardnews.MIN_CARD_SECONDS)
 
 
 class TestOutputLocation(unittest.TestCase):
