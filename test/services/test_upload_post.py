@@ -21,12 +21,18 @@ _CONFIG_BASE = {
 }
 
 
-def _mock_response(success=True, body=None):
+def _mock_response(success=True, body=None, status=200):
     r = MagicMock()
     if body is None:
         body = json.dumps({"success": success, "request_id": "abc123"}).encode("utf-8")
+    r.status_code = status
     r.raw.read.return_value = body
     r.raise_for_status = MagicMock()
+    if status >= 400:
+        # 진짜 응답은 여기서 예외를 올린다. 올리게 두면 거절과 끊김이 같아진다.
+        r.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            f"{status} Error", response=r
+        )
     return r
 
 
@@ -113,15 +119,73 @@ class TestResponseIsExternalInput(unittest.TestCase):
     있는데, 본문 파싱에서 나는 예외는 아래 `RequestException` 에 걸리지 않는다.
     """
 
-    def _upload(self, body):
+    def _upload(self, body, status=200):
         with (
             patch("app.services.upload_post.config.app", _CONFIG_BASE),
             patch("app.services.upload_post.os.path.exists", return_value=True),
             patch("builtins.open", mock_open(read_data=b"fake")),
             patch("app.services.upload_post.requests.post") as post,
         ):
-            post.return_value = _mock_response(body=body)
+            post.return_value = _mock_response(body=body, status=status)
             return UploadPostService().upload_video("/fake/v.mp4", "T")
+
+    def test_a_success_flag_that_is_not_a_boolean_is_not_success(self):
+        """
+        `success` 는 참/거짓으로 오기로 되어 있다. 문자열 "false" 를 그대로 믿으면
+        비어 있지 않다는 이유로 성공이 된다.
+        """
+        for value in ('"false"', '"0"', "0", "null", '"yes"'):
+            with self.subTest(success=value):
+                result = self._upload(b'{"success": ' + value.encode() + b"}")
+                self.assertFalse(result["success"])
+
+    def test_a_refusal_can_be_sent_again(self):
+        """
+        제목이 길거나 키가 틀려서 거절당한 것은 안 올라간 것이다. 모르겠다고 하면
+        고쳐서 다시 보낼 수 있는 영상이 영영 막힌다.
+        """
+        for status in (400, 401, 403, 404, 429):
+            with self.subTest(status=status):
+                result = self._upload(b'{"error": "nope"}', status=status)
+                self.assertFalse(result["success"])
+                self.assertFalse(result.get("indeterminate"))
+
+    def test_a_server_error_says_it_does_not_know(self):
+        """5xx 는 저쪽이 받아 놓고 처리하다 넘어진 것일 수 있다."""
+        for status in (500, 502, 503):
+            with self.subTest(status=status):
+                result = self._upload(b'{"error": "oops"}', status=status)
+                self.assertTrue(result.get("indeterminate"))
+
+    def test_a_refusal_with_a_broken_body_can_still_be_sent_again(self):
+        result = self._upload(b"<html>400 Bad Request</html>", status=400)
+        self.assertFalse(result.get("indeterminate"))
+
+    def test_provider_text_is_cut_and_kept_printable(self):
+        """이 값들이 기록과 텔레그램 화면으로 그대로 간다."""
+        hostile = json.dumps(
+            {
+                "success": True,
+                "request_id": "a[2Jb" + "x" * 5000,
+                "message": "m" * 5000,
+            }
+        ).encode("utf-8")
+
+        result = self._upload(hostile)
+
+        for field in ("request_id", "message"):
+            self.assertNotIn("", result[field])
+            self.assertLessEqual(len(result[field]), 300)
+
+    def test_a_hostile_error_message_is_sanitized(self):
+        leak = json.dumps(
+            {"error": "https://user:hunter2@upload.test/api?api_key=SECRET42"}
+        ).encode("utf-8")
+
+        result = self._upload(leak, status=400)
+
+        self.assertNotIn("hunter2", result["error"])
+        self.assertNotIn("SECRET42", result["error"])
 
     def test_a_body_that_is_not_json_is_a_failure(self):
         result = self._upload(b"<html>gateway timeout</html>")
