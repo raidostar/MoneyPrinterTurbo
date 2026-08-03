@@ -1,18 +1,18 @@
 <div align="center">
 
-# MoneyPrinterTurbo 💸
+# shipcast 💸
 
 ### An All-in-One AI Short Video Generator
 
-Provide a video <b>topic</b> or <b>keyword</b>, and MoneyPrinterTurbo will generate the script, match footage, create subtitles and background music, and produce an HD short video.
+Provide a video <b>topic</b> or <b>keyword</b>, and shipcast will generate the script, match footage, create subtitles and background music, and produce an HD short video.
 
 [![Version](https://img.shields.io/github/v/release/harry0703/MoneyPrinterTurbo?color=blue&label=version)](https://github.com/harry0703/MoneyPrinterTurbo/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/harry0703/MoneyPrinterTurbo/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Downloads](https://img.shields.io/github/downloads/harry0703/MoneyPrinterTurbo/total)](https://github.com/harry0703/MoneyPrinterTurbo/releases/latest)
 
-<a href="https://trendshift.io/repositories/8731" target="_blank"><img src="https://trendshift.io/api/badge/repositories/8731" alt="harry0703%2FMoneyPrinterTurbo | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-<a href="https://www.star-history.com/harry0703/moneyprinterturbo"><img src="https://api.star-history.com/badge?repo=harry0703/MoneyPrinterTurbo" alt="Star History Rank" style="height: 55px;" height="55"/></a>
+<a href="https://trendshift.io/repositories/8731" target="_blank"><img src="https://trendshift.io/api/badge/repositories/8731" alt="harry0703%2Fshipcast | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+<a href="https://www.star-history.com/harry0703/shipcast"><img src="https://api.star-history.com/badge?repo=harry0703/MoneyPrinterTurbo" alt="Star History Rank" style="height: 55px;" height="55"/></a>
 
 English | [한국어](README.md) | [Releases](https://github.com/harry0703/MoneyPrinterTurbo/releases) | [Issues](https://github.com/harry0703/MoneyPrinterTurbo/issues)
 
@@ -31,22 +31,22 @@ English | [한국어](README.md) | [Releases](https://github.com/harry0703/Money
 ## Special Thanks ❤️
 
 <div align="center">
-  <a href="https://platform.kimi.ai/?aff=MoneyPrinterTurbo" target="_blank"><img src="https://gcdn.moonshot.cn/growth-cdn/sponsor/kimi-en.png" alt="Kimi sponsors MoneyPrinterTurbo" width="100%"></a>
+  <a href="https://platform.kimi.ai/?aff=MoneyPrinterTurbo" target="_blank"><img src="https://gcdn.moonshot.cn/growth-cdn/sponsor/kimi-en.png" alt="Kimi sponsors shipcast" width="100%"></a>
 </div>
 
-Thanks to [Kimi](https://platform.kimi.ai/?aff=MoneyPrinterTurbo) for sponsoring this project! [Kimi K3](https://www.kimi.com/blog/kimi-k3?aff=MoneyPrinterTurbo) is Moonshot AI's most capable model and the world's first open 3T-class model. With native vision and a 1-million-token context window, K3 delivers frontier performance across knowledge work, reasoning, and long-horizon tasks. Within MoneyPrinterTurbo, K3 powers video creation by writing scripts and extracting the search keywords that determine the final footage—the better it understands the content, the more relevant the results.
+Thanks to [Kimi](https://platform.kimi.ai/?aff=MoneyPrinterTurbo) for sponsoring this project! [Kimi K3](https://www.kimi.com/blog/kimi-k3?aff=MoneyPrinterTurbo) is Moonshot AI's most capable model and the world's first open 3T-class model. With native vision and a 1-million-token context window, K3 delivers frontier performance across knowledge work, reasoning, and long-horizon tasks. Within shipcast, K3 powers video creation by writing scripts and extracting the search keywords that determine the final footage—the better it understands the content, the more relevant the results.
 
-**MoneyPrinterTurbo already supports Kimi. Visit the Kimi Open Platform ([China](https://platform.kimi.com/?aff=MoneyPrinterTurbo) | [Global](https://platform.kimi.ai/?aff=MoneyPrinterTurbo)) to try the API, or explore the [Kimi Code subscription](https://www.kimi.com/code?aff=MoneyPrinterTurbo).**
+**shipcast already supports Kimi. Visit the Kimi Open Platform ([China](https://platform.kimi.com/?aff=MoneyPrinterTurbo) | [Global](https://platform.kimi.ai/?aff=MoneyPrinterTurbo)) to try the API, or explore the [Kimi Code subscription](https://www.kimi.com/code?aff=MoneyPrinterTurbo).**
 
 <br>
 <table align="center">
   <tr>
     <td align="center" width="120">
-      <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=MoneyPrinterTurbo&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo"><img src="docs/sponsors/byteplus-logo.svg" alt="BytePlus" height="25"></a><br>
-      <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=MoneyPrinterTurbo&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo"><strong>BytePlus ModelArk</strong></a>
+      <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=shipcast&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo"><img src="docs/sponsors/byteplus-logo.svg" alt="BytePlus" height="25"></a><br>
+      <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=shipcast&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo"><strong>BytePlus ModelArk</strong></a>
     </td>
     <td align="left">
-      Thanks to Dola Seed for sponsoring this project! <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=MoneyPrinterTurbo&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo">Dola Seed 2.0</a> is a full-modal general large model independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long-task execution, tool integration, and coding capabilities. Register via this link to get 500,000 tokens of free inference quota per model.
+      Thanks to Dola Seed for sponsoring this project! <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=shipcast&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=MoneyPrinterTurbo">Dola Seed 2.0</a> is a full-modal general large model independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long-task execution, tool integration, and coding capabilities. Register via this link to get 500,000 tokens of free inference quota per model.
     </td>
   </tr>
   <tr>
@@ -64,7 +64,7 @@ Thanks to [Kimi](https://platform.kimi.ai/?aff=MoneyPrinterTurbo) for sponsoring
       <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt"><strong>Cubence</strong></a>
     </td>
     <td align="left">
-      Thanks to <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt">Cubence</a> for supporting this project. Cubence is a platform focused on AI model API access, helping developers and teams call models in a stable and convenient way. Since its launch in September 2025, Cubence has supported API access scenarios for Claude Code, Codex, Gemini, and other AI models and developer tools, making it suitable for users who need unified management and access to multiple model capabilities. Cubence offers MoneyPrinterTurbo users an exclusive discount code: <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt"><code>MPT</code></a>. Use it on your first purchase to get <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt">10% off</a>.
+      Thanks to <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt">Cubence</a> for supporting this project. Cubence is a platform focused on AI model API access, helping developers and teams call models in a stable and convenient way. Since its launch in September 2025, Cubence has supported API access scenarios for Claude Code, Codex, Gemini, and other AI models and developer tools, making it suitable for users who need unified management and access to multiple model capabilities. Cubence offers shipcast users an exclusive discount code: <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt"><code>MPT</code></a>. Use it on your first purchase to get <a href="https://cubence.com/signup?code=SCE1CJPE&source=mpt">10% off</a>.
     </td>
   </tr>
   <tr>
@@ -78,11 +78,11 @@ Thanks to [Kimi](https://platform.kimi.ai/?aff=MoneyPrinterTurbo) for sponsoring
   </tr>
   <tr>
     <td align="center" width="120">
-      <a href="https://ergouapi.com/r/gh-moneyprinterturbo"><img src="docs/sponsors/ergou-api-logo.png" alt="Ergou API" height="56"></a><br>
-      <a href="https://ergouapi.com/r/gh-moneyprinterturbo"><strong>Ergou API</strong></a>
+      <a href="https://ergouapi.com/r/gh-shipcast"><img src="docs/sponsors/ergou-api-logo.png" alt="Ergou API" height="56"></a><br>
+      <a href="https://ergouapi.com/r/gh-shipcast"><strong>Ergou API</strong></a>
     </td>
     <td align="left">
-      Thanks to <a href="https://ergouapi.com/r/gh-moneyprinterturbo">Ergou API</a> for sponsoring this project! Ergou API: The rock-solid AI API Gateway. Unlock ultra-low multipliers (0.1x - 0.2x) across the board. We provide 100% genuine, unfiltered endpoints for top-tier LLMs including Claude, GPT, and Gemini. Powered by premium IPLC routes and dual residential ISP redundancy, Ergou guarantees battle-tested stability and ultra-low latency for your global traffic. Built for developers and studios. <a href="https://ergouapi.com/r/gh-moneyprinterturbo">Sign up and start building today</a>.
+      Thanks to <a href="https://ergouapi.com/r/gh-shipcast">Ergou API</a> for sponsoring this project! Ergou API: The rock-solid AI API Gateway. Unlock ultra-low multipliers (0.1x - 0.2x) across the board. We provide 100% genuine, unfiltered endpoints for top-tier LLMs including Claude, GPT, and Gemini. Powered by premium IPLC routes and dual residential ISP redundancy, Ergou guarantees battle-tested stability and ultra-low latency for your global traffic. Built for developers and studios. <a href="https://ergouapi.com/r/gh-shipcast">Sign up and start building today</a>.
     </td>
   </tr>
   <tr>
@@ -125,7 +125,7 @@ Thanks to [Kimi](https://platform.kimi.ai/?aff=MoneyPrinterTurbo) for sponsoring
 
 ## Gallery 🎬
 
-All examples below were generated with MoneyPrinterTurbo.
+All examples below were generated with shipcast.
 
 ### Portrait 9:16
 
@@ -187,7 +187,7 @@ All examples below were generated with MoneyPrinterTurbo.
 
 ### Generate Videos with an AI Agent
 
-If your AI Agent can read Skill documents and operate a local terminal, send it the prompt below. The Agent will install and configure MoneyPrinterTurbo, generate the video, and return the video file path. It will ask only for required API keys that are not already configured. This workflow currently supports macOS and Windows.
+If your AI Agent can read Skill documents and operate a local terminal, send it the prompt below. The Agent will install and configure shipcast, generate the video, and return the video file path. It will ask only for required API keys that are not already configured. This workflow currently supports macOS and Windows.
 
 ```text
 Use this Skill: https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/SKILL.md
@@ -196,9 +196,9 @@ Create a video with the topic "How AI is changing everyday life."
 
 ### Run in Google Colab
 
-Want to try MoneyPrinterTurbo without setting up a local environment? Run it directly in Google Colab!
+Want to try shipcast without setting up a local environment? Run it directly in Google Colab!
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/harry0703/MoneyPrinterTurbo/blob/main/docs/MoneyPrinterTurbo.ipynb)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/harry0703/MoneyPrinterTurbo/blob/main/docs/shipcast.ipynb)
 
 ### Windows
 
@@ -242,11 +242,11 @@ If you are using a Windows system, please refer to Microsoft's documentation:
 2. https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-containers
 
 ```shell
-cd MoneyPrinterTurbo
+cd shipcast
 docker compose -f docker-compose.release.yml up
 ```
 
-> The recommended default is `docker-compose.release.yml`, which pulls the prebuilt image from GitHub Container Registry: `ghcr.io/harry0703/moneyprinterturbo:latest`.
+> The recommended default is `docker-compose.release.yml`, which pulls the prebuilt image from GitHub Container Registry: `ghcr.io/harry0703/shipcast:latest`.
 > If you need to build the image locally, you can still run `docker compose up`.
 > Before the first start, copy `config.example.toml` to `config.toml` so it can be mounted into the containers.
 
@@ -266,7 +266,7 @@ Use [uv](https://docs.astral.sh/uv/) to manage the Python environment and depend
 
 ```shell
 git clone https://github.com/harry0703/MoneyPrinterTurbo.git
-cd MoneyPrinterTurbo
+cd shipcast
 uv python install 3.11
 uv sync --frozen
 ```
@@ -287,7 +287,7 @@ Notes:
 
 #### ② Launch the WebUI 🌐
 
-Note that you need to execute the following commands in the `root directory` of the MoneyPrinterTurbo project
+Note that you need to execute the following commands in the `root directory` of the shipcast project
 
 ###### Windows
 
@@ -343,7 +343,7 @@ uv run python cli.py --help
 
 ## Voice Synthesis 🗣
 
-The default provider is the free **Edge TTS**, shown as **Azure TTS V1** in the WebUI. MoneyPrinterTurbo also supports **Azure TTS V2**, **SiliconFlow TTS**, **Google Gemini TTS**, **Xiaomi MiMo TTS**, **ElevenLabs TTS**, self-hosted **Chatterbox TTS**, and a no-voice mode.
+The default provider is the free **Edge TTS**, shown as **Azure TTS V1** in the WebUI. shipcast also supports **Azure TTS V2**, **SiliconFlow TTS**, **Google Gemini TTS**, **Xiaomi MiMo TTS**, **ElevenLabs TTS**, self-hosted **Chatterbox TTS**, and a no-voice mode.
 
 Select a provider and voice in the WebUI, then follow the on-screen instructions for any required credentials. Edge TTS does not require an API key; [Azure TTS V2](https://portal.azure.com/) and other cloud providers require credentials from their respective platforms. See the available Edge TTS voices in the [voice list](./docs/voice-list.txt).
 
@@ -366,10 +366,10 @@ model_size = "large-v3-turbo"
 
 > On first use, Whisper automatically downloads the model from Hugging Face. If the automatic download fails, download `whisper-large-v3` manually from [Hugging Face](https://huggingface.co/Systran/faster-whisper-large-v3).
 
-After extracting the model, place the entire directory in `.\MoneyPrinterTurbo\models`. The final path should be `.\MoneyPrinterTurbo\models\whisper-large-v3`:
+After extracting the model, place the entire directory in `.\shipcast\models`. The final path should be `.\shipcast\models\whisper-large-v3`:
 
 ```
-MoneyPrinterTurbo
+shipcast
   ├─models
   │   └─whisper-large-v3
   │          config.json
@@ -485,7 +485,7 @@ Click to view the [`LICENSE`](LICENSE) file
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=harry0703%2FMoneyPrinterTurbo&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=harry0703%2Fshipcast&type=date&legend=top-left">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harry0703/MoneyPrinterTurbo&type=date&theme=dark&legend=top-left&sealed_token=AtOR8By6GcNKd46eJLixrnucHF_99GOSBBKfc60pAm2xsDylemaYxDMcvTlPRz-G_onzDrs-hDrM0xdKkn0L6PgDin3fv02ViVtsZvgRYgk0YOzkX2KgLG8wro66VGphii-u6GNpzD8JocrqGGKvsFSpmbRqo5g-2mEDaN7-ESdtF48ZH0rDOCpoc1Mh" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=harry0703/MoneyPrinterTurbo&type=date&legend=top-left&sealed_token=AtOR8By6GcNKd46eJLixrnucHF_99GOSBBKfc60pAm2xsDylemaYxDMcvTlPRz-G_onzDrs-hDrM0xdKkn0L6PgDin3fv02ViVtsZvgRYgk0YOzkX2KgLG8wro66VGphii-u6GNpzD8JocrqGGKvsFSpmbRqo5g-2mEDaN7-ESdtF48ZH0rDOCpoc1Mh" />
