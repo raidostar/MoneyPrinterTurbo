@@ -20,7 +20,7 @@ import requests
 from loguru import logger
 
 from app.config import config
-from app.models.schema import VideoParams
+from app.models.schema import DEFAULT_VOICE_RATE, VideoParams
 from app.services import (
     cardnews,
     cardscript,
@@ -188,7 +188,7 @@ def _build_params(subject: str, script: str) -> VideoParams:
         video_script=script,
         video_language=str(saved.get("video_language", "") or ""),
         voice_name=str(saved.get("voice_name", "") or ""),
-        voice_rate=float(saved.get("voice_rate", 1.0) or 1.0),
+        voice_rate=float(saved.get("voice_rate", DEFAULT_VOICE_RATE) or DEFAULT_VOICE_RATE),
         font_name=str(saved.get("font_name", "") or ""),
         font_size=int(saved.get("font_size", 60) or 60),
         text_fore_color=str(saved.get("text_fore_color", "#FFFFFF") or "#FFFFFF"),
@@ -434,7 +434,9 @@ class ShortsBot:
             video_subject=subject,
             language=str(config.ui.get("video_language", "") or ""),
             paragraph_number=3,
-            script_style="story",
+            # 물건 이야기를 만든다. 경험담 스타일은 재미있는 사건은 잘 쓰지만
+            # 물건을 다루지 않아, 미숫가루로 시켜도 미숫가루 이야기가 안 나온다.
+            script_style="product",
         )
         if not script or script.startswith("Error:"):
             _send(self.chat_id, "대본 생성에 실패했어요. 잠시 후 다시 해보세요.")

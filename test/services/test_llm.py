@@ -1978,3 +1978,37 @@ class TestProjectJudgement(unittest.TestCase):
                 payload = '{"entry": {"score": %s, "reason": "x"}}' % literal
                 # 예외 없이 빈 결과여야 한다.
                 self.assertEqual(self._judge(payload), {})
+
+
+class TestSentenceSpacing(unittest.TestCase):
+    """
+    모델이 문단을 붙여 내놓으면 "되더라.검은콩" 처럼 이어진다. 자막은 문장 부호에서
+    끊으므로 그 조각이 다음 줄 앞에 붙어 나가고, 합성 음성도 한 덩어리로 읽는다.
+    """
+
+    def _script(self, response):
+        with patch.object(llm, "_generate_response", return_value=response):
+            return llm.generate_script(video_subject="주제")
+
+    def test_a_run_on_sentence_is_separated(self):
+        self.assertIn("되더라. 검은콩", self._script("결국 그렇게 되더라.검은콩 가루를 탐."))
+
+    def test_a_question_mark_counts_too(self):
+        self.assertIn("뭐임? 그러니까", self._script("이게 뭐임?그러니까 다시 함."))
+
+    def test_a_decimal_point_is_left_alone(self):
+        """숫자를 쪼개면 합성 음성이 "일 점 오" 대신 "일. 오" 로 읽는다."""
+        self.assertIn("1.5배", self._script("가격은 1.5배임. 그래서 안 삼."))
+
+    def test_an_address_is_left_alone(self):
+        self.assertIn("www.example.com", self._script("www.example.com 참고. 그게 다임."))
+
+    def test_an_acronym_is_left_alone(self):
+        for text in ("U.S.A 에서 옴. 그게 끝.", "A.I.도 마찬가지임. 진짜임."):
+            with self.subTest(text=text):
+                result = self._script(text)
+                self.assertNotIn("U. S.", result)
+                self.assertNotIn("A. I.", result)
+
+    def test_text_that_is_already_spaced_is_not_double_spaced(self):
+        self.assertNotIn("있음.  그대로", self._script("이미 띄어져 있음. 그대로 둠."))

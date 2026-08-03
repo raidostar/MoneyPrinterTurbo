@@ -14,7 +14,7 @@ from loguru import logger
 # `llm.SCRIPT_STYLE_PROMPTS` 의 키와 같아야 한다. 여기서 직접 import 하지 않는 이유는
 # 이 파일이 app 패키지를 늦게 불러와 `-h` 출력이 무거워지지 않게 하기 때문이다.
 # 어긋나면 test_cli 가 잡는다.
-SCRIPT_STYLE_CHOICES = ("informative", "story")
+SCRIPT_STYLE_CHOICES = ("informative", "story", "product")
 
 if TYPE_CHECKING:
     from app.models.schema import MaterialInfo, VideoParams

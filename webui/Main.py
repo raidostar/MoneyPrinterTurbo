@@ -35,6 +35,7 @@ from app.models.llm_provider import (
     normalize_provider_override,
 )
 from app.models.schema import (
+    DEFAULT_VOICE_RATE,
     MaterialInfo,
     VideoAspect,
     VideoConcatMode,
@@ -1018,7 +1019,9 @@ def _apply_pending_task_restore():
         _set_stable_widget_value("tts_server_select", tts_server)
         _set_stable_widget_value(f"speech_synthesis_select_{tts_server}", voice_name)
     _set_stable_widget_value("voice_volume_select", params.get("voice_volume", 1.0))
-    _set_stable_widget_value("voice_rate_select", params.get("voice_rate", 1.0))
+    _set_stable_widget_value(
+        "voice_rate_select", params.get("voice_rate", DEFAULT_VOICE_RATE)
+    )
     bgm_type = params.get("bgm_type") or ""
     _set_stable_widget_value("bgm_type_select", bgm_type)
     _set_stable_widget_value("bgm_volume_select", params.get("bgm_volume", 0.2))
@@ -3531,7 +3534,7 @@ def _render_audio_settings(panel, params):
                     params.voice_rate = stable_selectbox(
                         tr("Voiceover Speed"),
                         options=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0],
-                        default_value=1.0,
+                        default_value=DEFAULT_VOICE_RATE,
                         key="voice_rate_select",
                         format_func=lambda value: f"{value:.1f}×",
                         help=tr("Voiceover Speed Help"),
