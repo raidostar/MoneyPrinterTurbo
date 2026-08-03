@@ -21,7 +21,7 @@ from loguru import logger
 
 from app.config import config
 from app.models.schema import VideoParams
-from app.services import cardscript, cardvideo, daily, llm, task_artifacts
+from app.services import cardscript, cardvideo, daily, llm, publish, task_artifacts
 from app.services import task as tm
 from app.utils import utils
 
@@ -212,6 +212,8 @@ class ShortsBot:
         self._lock = threading.Lock()
         # 오늘 보여 준 후보. 버튼을 누르면 여기서 찾는다.
         self.candidates: dict[str, object] = {}
+        # 올릴지 물어본 영상. 버튼을 누르면 여기서 찾는다.
+        self.uploads: dict[str, tuple] = {}
         # 기록 파일에 못 쓴 날을 위한 대비. 저장이 실패해도 이번 실행 동안에는
         # 같은 목록을 다시 보내지 않는다.
         self.offered_date = ""
@@ -370,6 +372,7 @@ class ShortsBot:
             # 만든 것만 기록한다. 후보로 보여 주기만 한 소재는 내일 다시 나온다.
             daily.mark_used(item)
             _send_video(self.chat_id, result.video_path, caption=item.title)
+            self._offer_publish(publish.CARD_NEWS, result.video_path, item.title)
         except Exception as exc:
             logger.error(
                 f"telegram card render failed: {task_id}, "
@@ -417,6 +420,42 @@ class ShortsBot:
                 ]
             ],
         )
+
+    # ---- 올리기 ----
+
+    def _offer_publish(self, channel: str, video_path: str, title: str) -> None:
+        """
+        올릴지 물어보거나, 물어보지 않기로 해 뒀으면 바로 올린다.
+
+        기본은 물어보는 쪽이다. 만들어 보는 동안 시험용 영상까지 계정에 올라가면
+        되돌릴 수 없고, 무료 사용량도 거기서 소진된다.
+        """
+        if not publish.resolve_target(channel):
+            return
+
+        if publish.auto_publishes(channel):
+            self._publish_now(channel, video_path, title)
+            return
+
+        token = uuid4().hex[:8]
+        self.uploads[token] = (channel, video_path, title)
+        _send(
+            self.chat_id,
+            "이 영상 올릴까요?",
+            buttons=[[{"text": "올리기", "callback_data": f"publish:{token}"}]],
+        )
+
+    def _publish_now(self, channel: str, video_path: str, title: str) -> None:
+        """올리고 결과를 알린다."""
+        _send(self.chat_id, "올리는 중…")
+        result = publish.publish(channel=channel, video_path=video_path, title=title)
+        if result.skipped:
+            _send(self.chat_id, f"올리지 않았어요: {result.skipped}")
+            return
+        if not result.ok:
+            _send(self.chat_id, f"업로드에 실패했어요: {result.error[:200]}")
+            return
+        _send(self.chat_id, f"올렸어요: {', '.join(result.platforms)}")
 
     # ---- 렌더링 ----
 
@@ -505,6 +544,18 @@ class ShortsBot:
                 _send(self.chat_id, "지난 목록의 버튼이에요. /오늘 로 다시 불러 주세요.")
                 return
             self._draft_cards(item)
+            return
+
+        if action == "publish":
+            # 누른 버튼은 쓴다. 남겨 두면 다시 눌러 같은 영상을 또 올리게 된다.
+            offer = self.uploads.pop(draft_id, None)
+            if offer is None:
+                _send(self.chat_id, "지난 영상의 버튼이에요.")
+                return
+            # 업로드는 몇 분이 걸린다. 폴링을 막으면 그동안 명령을 못 받는다.
+            threading.Thread(
+                target=self._publish_now, args=offer, daemon=True
+            ).start()
             return
 
         if not self.pending.get("script"):

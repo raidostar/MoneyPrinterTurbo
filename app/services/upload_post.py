@@ -23,7 +23,11 @@ class UploadPostService:
         self.youtube_privacy_status = config.app.get("upload_post_youtube_privacy_status", "public")
 
     def is_configured(self) -> bool:
-        return bool(self.api_key and self.username and self.enabled)
+        return self._can_upload(self.username)
+
+    def _can_upload(self, username: str) -> bool:
+        """키와 올릴 프로필이 있고 켜져 있는지. 프로필은 채널마다 다를 수 있다."""
+        return bool(self.api_key and username and self.enabled)
 
     def upload_video(
         self,
@@ -32,8 +36,13 @@ class UploadPostService:
         platforms: Optional[list] = None,
         privacy_level: str = "PUBLIC_TO_EVERYONE",
         youtube_extra: Optional[dict] = None,
+        username: str = "",
+        extra_fields: Optional[dict] = None,
     ) -> dict:
-        if not self.is_configured():
+        # 채널마다 올라가는 계정이 다르다. 프로필을 받으면 그것으로 보내고, 없으면
+        # 설정에 적힌 기본 프로필을 쓴다.
+        username = str(username or "").strip() or self.username
+        if not self._can_upload(username):
             logger.warning("Upload-Post is not configured. Skipping cross-post.")
             return {"success": False, "error": "Upload-Post not configured"}
 
@@ -51,7 +60,7 @@ class UploadPostService:
                 files = {'video': video_file}
 
                 data = [
-                    ('user', self.username),
+                    ('user', username),
                     ('title', title[:2200]),
                     ('privacy_level', privacy_level),
                 ]
@@ -68,6 +77,10 @@ class UploadPostService:
                         data.append(('tags[]', tag))
                     data.append(('privacyStatus', youtube_extra.get("privacyStatus", "public")))
                     data.append(('containsSyntheticMedia', "true"))
+
+                # 플랫폼별 추가 항목. AI 로 만들었다는 고지가 여기로 들어온다.
+                for key, value in (extra_fields or {}).items():
+                    data.append((str(key), str(value)))
 
                 headers = {'Authorization': f'Apikey {self.api_key}'}
 
@@ -132,5 +145,14 @@ def cross_post_video(
     title: str,
     platforms: Optional[list] = None,
     youtube_extra: Optional[dict] = None,
+    username: str = "",
+    extra_fields: Optional[dict] = None,
 ) -> dict:
-    return upload_post_service.upload_video(video_path, title, platforms, youtube_extra=youtube_extra)
+    return upload_post_service.upload_video(
+        video_path,
+        title,
+        platforms,
+        youtube_extra=youtube_extra,
+        username=username,
+        extra_fields=extra_fields,
+    )

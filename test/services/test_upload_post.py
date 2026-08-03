@@ -42,6 +42,68 @@ def _has_key(data, key):
     return any(k == key for k, v in data)
 
 
+class TestChannelProfile(unittest.TestCase):
+    """
+    채널마다 올라가는 계정이 다르다. 프로필을 정해 보냈는데 설정에 적힌 기본
+    프로필로 나가면, 카드뉴스가 쇼츠 계정에 올라간다.
+    """
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_given_profile_is_the_one_used(self, mock_post, _exists):
+        mock_post.return_value = _mock_response()
+
+        UploadPostService().upload_video("/fake/v.mp4", "T", username="cardnews")
+
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "cardnews")
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_without_one_the_configured_profile_is_used(self, mock_post, _exists):
+        mock_post.return_value = _mock_response()
+
+        UploadPostService().upload_video("/fake/v.mp4", "T")
+
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "testuser")
+
+    @patch(
+        "app.services.upload_post.config.app",
+        {**_CONFIG_BASE, "upload_post_username": ""},
+    )
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_a_channel_profile_works_without_a_configured_one(self, mock_post, _exists):
+        """기본 프로필을 비워 둔 채로 카드뉴스만 올리는 설정이 가능해야 한다."""
+        mock_post.return_value = _mock_response()
+
+        result = UploadPostService().upload_video("/fake/v.mp4", "T", username="cardnews")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "user"), "cardnews")
+
+    @patch("app.services.upload_post.config.app", _CONFIG_BASE)
+    @patch("app.services.upload_post.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"fake"))
+    @patch("app.services.upload_post.requests.post")
+    def test_extra_fields_reach_the_request(self, mock_post, _exists):
+        """
+        AI 로 만들었다는 고지가 이 길로 나간다. 조용히 버려지면 밝히지 않은 채
+        올라간다.
+        """
+        mock_post.return_value = _mock_response()
+
+        UploadPostService().upload_video(
+            "/fake/v.mp4", "T", extra_fields={"is_aigc": "true"}
+        )
+
+        self.assertEqual(_get(mock_post.call_args[1]["data"], "is_aigc"), "true")
+
+
 class TestUploadPostService(unittest.TestCase):
     @patch(
         "app.services.upload_post.config.app",

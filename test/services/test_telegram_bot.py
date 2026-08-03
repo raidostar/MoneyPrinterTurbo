@@ -707,5 +707,121 @@ class TestDailySchedule(unittest.TestCase):
                 offer.assert_not_called()
 
 
+class TestPublishing(unittest.TestCase):
+    """만든 영상을 계정에 올린다."""
+
+    def _bot(self):
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        return shorts
+
+    def _target(self):
+        return bot.publish.PublishTarget(
+            channel=bot.publish.CARD_NEWS, profile="p", platforms=("youtube",)
+        )
+
+    def test_it_asks_before_publishing(self):
+        """
+        시험용 영상이 계정에 올라가면 되돌릴 수 없고, 무료 사용량도 거기서 나간다.
+        """
+        shorts = self._bot()
+        with (
+            patch.object(bot.publish, "resolve_target", return_value=self._target()),
+            patch.object(bot.publish, "auto_publishes", return_value=False),
+            patch.object(bot.publish, "publish") as published,
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._offer_publish(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+
+        published.assert_not_called()
+        self.assertEqual(len(shorts.uploads), 1)
+        self.assertIn("publish:", str(send.call_args.kwargs["buttons"]))
+
+    def test_the_button_publishes_what_it_was_made_for(self):
+        shorts = self._bot()
+        shorts.uploads = {"tok": (bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")}
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_publish_now") as now,
+            patch.object(bot.threading, "Thread") as thread,
+        ):
+            thread.side_effect = lambda target, args, daemon: SimpleNamespace(
+                start=lambda: target(*args)
+            )
+            shorts.handle_update(_callback(111, "publish:tok"))
+
+        now.assert_called_once_with(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+
+    def test_the_button_is_spent_when_used(self):
+        """남겨 두면 다시 눌러 같은 영상을 또 올리게 된다."""
+        shorts = self._bot()
+        shorts.uploads = {"tok": (bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")}
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_publish_now"),
+            patch.object(bot.threading, "Thread"),
+        ):
+            shorts.handle_update(_callback(111, "publish:tok"))
+        self.assertEqual(shorts.uploads, {})
+
+    def test_a_stale_button_does_not_publish(self):
+        shorts = self._bot()
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_publish_now") as now,
+        ):
+            shorts.handle_update(_callback(111, "publish:gone"))
+        now.assert_not_called()
+
+    def test_an_unconfigured_channel_asks_nothing(self):
+        """올릴 곳이 없는데 버튼을 붙이면 눌러도 아무 일이 안 일어난다."""
+        shorts = self._bot()
+        with (
+            patch.object(bot.publish, "resolve_target", return_value=None),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._offer_publish(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+        send.assert_not_called()
+        self.assertEqual(shorts.uploads, {})
+
+    def test_turning_it_on_publishes_without_asking(self):
+        shorts = self._bot()
+        with (
+            patch.object(bot.publish, "resolve_target", return_value=self._target()),
+            patch.object(bot.publish, "auto_publishes", return_value=True),
+            patch.object(shorts, "_publish_now") as now,
+            patch.object(bot, "_send"),
+        ):
+            shorts._offer_publish(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+        now.assert_called_once_with(bot.publish.CARD_NEWS, "/tmp/a.mp4", "제목")
+
+    def test_a_finished_card_video_is_offered_for_publishing(self):
+        """만들어 놓고 올리지 않으면 자동화가 마지막 한 칸에서 끊긴다."""
+        from app.services.sources.base import SourceItem
+
+        shorts = self._bot()
+        item = SourceItem(source="hackernews", item_id="1", title="어떤 도구")
+        script = SimpleNamespace(
+            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            narrations=("말",),
+        )
+        rendered = SimpleNamespace(video_path="/tmp/cardnews.mp4", duration=30, card_count=1)
+        with (
+            patch.object(bot.task_artifacts, "write_script_data"),
+            patch.object(bot.cardvideo, "render_card_news", return_value=rendered),
+            patch.object(bot.daily, "mark_used"),
+            patch.object(bot, "_send_video"),
+            patch.object(shorts, "_offer_publish") as offer,
+        ):
+            shorts._render_cards(item, script)
+
+        offer.assert_called_once_with(
+            bot.publish.CARD_NEWS, "/tmp/cardnews.mp4", "어떤 도구"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

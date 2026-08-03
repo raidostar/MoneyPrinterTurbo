@@ -260,16 +260,36 @@ max_queued_tasks = 100
 # Cross-platform Publishing / 플랫폼 자동 업로드
 # -----------------------------------------------------------------------------
 
-# Upload-Post can publish generated videos to TikTok, Instagram, and YouTube.
+# Upload-Post publishes generated videos to several platforms with one request.
 # Create an account and API key at https://upload-post.com/
 # API documentation: https://docs.upload-post.com/
 upload_post_enabled = false
 upload_post_api_key = ""
+
+# The two channels publish to different accounts. Card news and shorts are
+# watched by different people, and mixing them in one account leaves neither
+# with a clear identity. Upload-Post hangs a set of platform accounts off a
+# "profile", so each channel names its own profile.
+#
+# Leaving a profile empty means that channel does not publish. It never falls
+# back to the other channel's profile — a video posted to the wrong account is
+# already out there by the time you delete it.
+
+# Short videos (/새영상).
 upload_post_username = ""
-# Available values: "tiktok", "instagram", "youtube".
-upload_post_platforms = ["tiktok", "instagram"]
+# Available values: "tiktok", "instagram", "youtube", "x", "threads",
+# "facebook", "linkedin", "pinterest", "bluesky", "reddit".
+upload_post_platforms = ["tiktok", "instagram", "youtube", "x", "threads"]
 # Automatically publish successful video outputs after generation.
 upload_post_auto_upload = false
+
+# Card news (/오늘).
+upload_post_cardnews_username = ""
+upload_post_cardnews_platforms = ["tiktok", "instagram", "youtube", "x", "threads"]
+# When false, the bot asks before publishing. Leave it off until you have seen
+# a few videos go out correctly — a test render posted to a real account cannot
+# be taken back, and the free monthly uploads are spent on it.
+upload_post_cardnews_auto_upload = false
 # YouTube privacy: "public", "unlisted", or "private".
 upload_post_youtube_privacy_status = "public"
 # Maximum number of running and queued cross-post jobs per process. When the
