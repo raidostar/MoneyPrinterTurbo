@@ -1,6 +1,7 @@
 """프로젝트 이름."""
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -17,7 +18,24 @@ SKIP_DIRS = {".git", ".venv", "storage", ".redteam", "__pycache__", "node_module
 
 
 def _tracked_files():
-    for path in ROOT.rglob("*"):
+    """
+    커밋된 파일만 본다.
+
+    `rglob` 으로 훑으면 영상 작업이 남긴 산출물과 로컬 메모까지 들어온다. 그런
+    파일에 옛 이름이 들어 있다는 이유로 검사가 실패하면, 정작 저장소는 멀쩡한데
+    아무도 못 고치는 실패가 된다.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    for name in listing.split("\0"):
+        if not name:
+            continue
+        path = ROOT / name
         if not path.is_file():
             continue
         if any(part in SKIP_DIRS for part in path.parts):
