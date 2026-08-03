@@ -18,6 +18,14 @@ from app.services.sources.base import SourceItem
 # 점수판 나레이션. 막대를 눈으로 읽는 동안 귀로 들을 말이다.
 SCORE_NARRATION_LEAD = "정리하면"
 MIN_SCORES_TO_SHOW = 2
+SCORE_CARD_TITLE = "점수"
+# 점수판은 한국어로만 만든다. 항목 이름과 숫자 읽기가 한국어라, 다른 언어 대본에
+# 붙이면 마지막 장만 한국어로 나온다.
+SCORE_LANGUAGE_PREFIX = "ko"
+
+
+def _is_korean(language: str) -> bool:
+    return str(language or "").strip().lower().startswith(SCORE_LANGUAGE_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -62,7 +70,7 @@ def _footer(item: SourceItem) -> str:
 _SOURCE_LABELS = {"hackernews": "Hacker News"}
 
 
-def _score_card(item: SourceItem, footer: str) -> tuple[Card, str] | None:
+def _score_card(item: SourceItem, footer: str, language: str) -> tuple[Card, str] | None:
     """
     마무리 점수 카드와 그 나레이션. 잴 것이 모자라면 ``None``.
 
@@ -71,9 +79,16 @@ def _score_card(item: SourceItem, footer: str) -> tuple[Card, str] | None:
 
     한 칸만 남으면 점수판을 만들지 않는다. 비교할 것이 없는 막대 하나는 판정이
     아니라 장식이다.
+
+    한국어 대본에만 붙인다. 항목 이름과 숫자 읽기가 한국어로 박혀 있어, 다른
+    언어 대본에 붙이면 마지막 장만 한국어로 나온다. 확인할 수 없는 번역을 지어
+    붙이느니 그 언어에서는 점수판 없이 끝내는 편이 낫다.
     """
+    if not _is_korean(language):
+        return None
+
     judged = llm.judge_project(
-        title=item.title, url=item.url, body_text=item.text, language="ko-KR"
+        title=item.title, url=item.url, body_text=item.text, language=language
     )
 
     scores = []
@@ -92,7 +107,7 @@ def _score_card(item: SourceItem, footer: str) -> tuple[Card, str] | None:
         return None
 
     spoken = ", ".join(f"{score.label} {_spoken(score.value)}점" for score in scores)
-    card = Card(title="점수", scores=tuple(scores), footer=footer)
+    card = Card(title=SCORE_CARD_TITLE, scores=tuple(scores), footer=footer)
     return card, f"{SCORE_NARRATION_LEAD} {spoken}입니다."
 
 
@@ -130,7 +145,7 @@ def build_card_script(item: SourceItem, language: str = "ko-KR") -> CardScript |
     footer = _footer(item)
     # 점수판은 대본을 다 쓴 뒤에 붙인다. 모델에게 점수까지 맡기면 무엇을 보든
     # 4점이 나오고, 그러면 매 영상이 똑같이 끝난다.
-    scored = _score_card(item, footer)
+    scored = _score_card(item, footer, language)
 
     cards = []
     narrations = []

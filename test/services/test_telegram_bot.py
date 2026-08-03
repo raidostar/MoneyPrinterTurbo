@@ -412,7 +412,7 @@ class TestDailyFlow(unittest.TestCase):
         shorts = self._bot()
         shorts.candidates = {"tok": SourceItem(source="hackernews", item_id="1", title="글")}
         script = SimpleNamespace(
-            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(index_label="01", title="제목", body=("하나",)),),
             narrations=("말",),
             narration_text="말",
         )
@@ -437,7 +437,7 @@ class TestDailyFlow(unittest.TestCase):
             url="https://example.com/x",
         )
         script = SimpleNamespace(
-            cards=(SimpleNamespace(title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(title="제목", body=("하나",)),),
             narrations=("말",),
         )
         made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=1)
@@ -804,6 +804,80 @@ class TestCandidateList(unittest.TestCase):
         digest.assert_called_once()
 
 
+class TestScoresAreShownAndKept(unittest.TestCase):
+    """
+    화면에 나가는 판정은 승인 전에 보여야 하고, 나간 뒤에는 기록에 남아야 한다.
+    """
+
+    def _script(self):
+        return SimpleNamespace(
+            cards=(
+                bot.cardnews.Card(index_label="01", title="여는 장", body=("하나",)),
+                bot.cardnews.Card(
+                    index_label="02",
+                    title="점수",
+                    scores=(
+                        bot.cardnews.Score("완성도", 4, "테스트 있음"),
+                        bot.cardnews.Score("바로 쓰기", 2, "GPU 필요"),
+                    ),
+                ),
+            ),
+            narrations=("말", "정리하면"),
+            narration_text="말 정리하면",
+        )
+
+    def test_the_approval_message_shows_the_scores(self):
+        """
+        "점수" 한 글자만 보고 승인하면, 못 본 판정이 붙은 영상이 그대로 계정에
+        올라간다.
+        """
+        from app.services.sources.base import SourceItem
+
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.cardscript, "build_card_script", return_value=self._script()),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._draft_cards(SourceItem(source="hackernews", item_id="1", title="글"))
+
+        said = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("완성도", said)
+        self.assertIn("테스트 있음", said)
+        self.assertIn("GPU 필요", said)
+        # 값도 보여야 한다. 이름만 보고는 몇 점인지 알 수 없다.
+        self.assertIn("4", said)
+        self.assertIn("2", said)
+
+    def test_the_manifest_keeps_the_scores_that_went_out(self):
+        """남기지 않으면 어떤 점수를 왜 줬는지 나중에 되짚을 수 없다."""
+        from app.services.sources.base import SourceItem
+
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        item = SourceItem(source="hackernews", item_id="1", title="글")
+        made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=2)
+        with (
+            patch.object(bot.task_artifacts, "write_script_data") as write,
+            patch.object(bot.cardvideo, "render_card_news", return_value=made),
+            patch.object(bot.daily, "mark_used"),
+            patch.object(bot, "_send_video"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_offer_publish"),
+        ):
+            shorts._render_cards(item, self._script())
+
+        cards = write.call_args.args[1]["cards"]
+        self.assertEqual(cards[0]["scores"], [])
+        self.assertEqual(
+            cards[1]["scores"],
+            [
+                {"label": "완성도", "value": 4, "reason": "테스트 있음"},
+                {"label": "바로 쓰기", "value": 2, "reason": "GPU 필요"},
+            ],
+        )
+
+
 class TestPublishing(unittest.TestCase):
     """만든 영상을 계정에 올린다."""
 
@@ -944,7 +1018,7 @@ class TestPublishing(unittest.TestCase):
         shorts = self._bot()
         item = SourceItem(source="hackernews", item_id="1", title="어떤 도구")
         script = SimpleNamespace(
-            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(index_label="01", title="제목", body=("하나",)),),
             narrations=("말",),
         )
         rendered = SimpleNamespace(video_path="/tmp/cardnews.mp4", duration=30, card_count=1)

@@ -408,3 +408,71 @@ class TestScoreLabelsReadTheRightWay(unittest.TestCase):
         for key in llm_module.JUDGEMENT_KEYS:
             self.assertTrue(llm_module.JUDGEMENT_LABELS.get(key))
         self.assertTrue(llm_module.JUDGEMENT_LABELS.get("maturity"))
+
+
+class TestScoreCardStaysKorean(unittest.TestCase):
+    """
+    항목 이름과 숫자 읽기가 한국어로 박혀 있다. 다른 언어 대본에 붙이면 마지막
+    장만 한국어로 나온다.
+    """
+
+    def _build(self, language):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": f"말 {i}"}
+            for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value={"entry": (5, "한 줄")}),
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=(4, "테스트 있음")),
+        ):
+            return cardscript.build_card_script(_item(), language=language)
+
+    def test_a_korean_deck_gets_the_scores(self):
+        for language in ("ko-KR", "ko", "KO-kr"):
+            with self.subTest(language=language):
+                self.assertTrue(self._build(language).cards[-1].scores)
+
+    def test_another_language_ends_without_them(self):
+        """확인할 수 없는 번역을 지어 붙이느니 점수판 없이 끝내는 편이 낫다."""
+        for language in ("en-US", "ja-JP", "zh-CN"):
+            with self.subTest(language=language):
+                script = self._build(language)
+                self.assertFalse(script.cards[-1].scores)
+                # 점수판이 빠지면 출처는 마지막 장에 남아야 한다.
+                self.assertTrue(script.cards[-1].footer)
+
+    def test_the_model_is_not_asked_at_all_for_another_language(self):
+        """쓰지도 않을 점수에 호출을 쓸 이유가 없다."""
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": "말"} for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project") as judge,
+            patch.object(cardscript.repo, "fetch_signals") as signals,
+        ):
+            cardscript.build_card_script(_item(), language="en-US")
+
+        judge.assert_not_called()
+        signals.assert_not_called()
+
+    def test_the_language_reaches_the_judge(self):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": "말"} for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value={}) as judge,
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=None),
+        ):
+            # 굳어 있는 값과 다른 한국어 표기를 넘긴다. "ko-KR" 로 시험하면
+            # 값을 통째로 무시해도 통과한다.
+            cardscript.build_card_script(_item(), language="ko")
+
+        self.assertEqual(judge.call_args.kwargs["language"], "ko")

@@ -21,7 +21,15 @@ from loguru import logger
 
 from app.config import config
 from app.models.schema import VideoParams
-from app.services import cardscript, cardvideo, daily, llm, publish, task_artifacts
+from app.services import (
+    cardnews,
+    cardscript,
+    cardvideo,
+    daily,
+    llm,
+    publish,
+    task_artifacts,
+)
 from app.services.sources import repo
 from app.services import task as tm
 from app.utils import utils
@@ -343,6 +351,12 @@ class ShortsBot:
         for card in script.cards:
             lines.append(f"[{card.index_label}] {card.title}")
             lines.extend(f"    · {bullet}" for bullet in card.body)
+            # 점수까지 보여 준다. "점수" 한 글자만 보고 승인하면, 못 본 판정이
+            # 붙은 영상이 그대로 계정에 올라간다.
+            for score in card.scores:
+                bar = "■" * score.value + "□" * (cardnews.MAX_SCORE - score.value)
+                reason = f"  {score.reason}" if score.reason else ""
+                lines.append(f"    {score.label} {bar} {score.value}{reason}")
         _send(
             self.chat_id,
             "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_LENGTH - 100],
@@ -378,6 +392,16 @@ class ShortsBot:
                             "title": card.title,
                             "bullets": list(card.body),
                             "narration": narration,
+                            # 화면에 나간 판정은 기록에 남아야 한다. 남기지 않으면
+                            # 어떤 점수를 왜 줬는지 나중에 되짚을 수 없다.
+                            "scores": [
+                                {
+                                    "label": score.label,
+                                    "value": score.value,
+                                    "reason": score.reason,
+                                }
+                                for score in card.scores
+                            ],
                         }
                         for card, narration in zip(script.cards, script.narrations)
                     ],
