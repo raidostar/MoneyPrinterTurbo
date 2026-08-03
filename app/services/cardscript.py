@@ -11,9 +11,21 @@ from loguru import logger
 
 from app.services import llm
 from app.services import cardnews
-from app.services.cardnews import Card
-from app.services.sources import enrich
+from app.services.cardnews import Card, Score
+from app.services.sources import enrich, repo
 from app.services.sources.base import SourceItem
+
+# 점수판 나레이션. 막대를 눈으로 읽는 동안 귀로 들을 말이다.
+SCORE_NARRATION_LEAD = "정리하면"
+MIN_SCORES_TO_SHOW = 2
+SCORE_CARD_TITLE = "점수"
+# 점수판은 한국어로만 만든다. 항목 이름과 숫자 읽기가 한국어라, 다른 언어 대본에
+# 붙이면 마지막 장만 한국어로 나온다.
+SCORE_LANGUAGE_PREFIX = "ko"
+
+
+def _is_korean(language: str) -> bool:
+    return str(language or "").strip().lower().startswith(SCORE_LANGUAGE_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -58,6 +70,55 @@ def _footer(item: SourceItem) -> str:
 _SOURCE_LABELS = {"hackernews": "Hacker News"}
 
 
+def _score_card(item: SourceItem, footer: str, language: str) -> tuple[Card, str] | None:
+    """
+    마무리 점수 카드와 그 나레이션. 잴 것이 모자라면 ``None``.
+
+    완성도는 저장소를 세서 넣고 나머지는 모델이 매긴다. 완성도까지 모델에게
+    물으면 무엇을 보든 4점이 나와, 매 영상이 똑같이 끝난다.
+
+    한 칸만 남으면 점수판을 만들지 않는다. 비교할 것이 없는 막대 하나는 판정이
+    아니라 장식이다.
+
+    한국어 대본에만 붙인다. 항목 이름과 숫자 읽기가 한국어로 박혀 있어, 다른
+    언어 대본에 붙이면 마지막 장만 한국어로 나온다. 확인할 수 없는 번역을 지어
+    붙이느니 그 언어에서는 점수판 없이 끝내는 편이 낫다.
+    """
+    if not _is_korean(language):
+        return None
+
+    judged = llm.judge_project(
+        title=item.title, url=item.url, body_text=item.text, language=language
+    )
+
+    scores = []
+    measured = repo.maturity(repo.fetch_signals(item.url))
+    if measured:
+        scores.append(
+            Score(label=llm.JUDGEMENT_LABELS["maturity"], value=measured[0], reason=measured[1])
+        )
+    for key in llm.JUDGEMENT_KEYS:
+        if key in judged:
+            value, reason = judged[key]
+            scores.append(Score(label=llm.JUDGEMENT_LABELS[key], value=value, reason=reason))
+
+    if len(scores) < MIN_SCORES_TO_SHOW:
+        logger.info(f"not enough to score: {item.source}:{item.item_id}")
+        return None
+
+    spoken = ", ".join(f"{score.label} {_spoken(score.value)}점" for score in scores)
+    card = Card(title=SCORE_CARD_TITLE, scores=tuple(scores), footer=footer)
+    return card, f"{SCORE_NARRATION_LEAD} {spoken}입니다."
+
+
+_SPOKEN_NUMBERS = {1: "일", 2: "이", 3: "삼", 4: "사", 5: "오"}
+
+
+def _spoken(value: int) -> str:
+    """숫자를 한글로. 합성기는 숫자를 밋밋하게 읽는다."""
+    return _SPOKEN_NUMBERS.get(value, str(value))
+
+
 def build_card_script(item: SourceItem, language: str = "ko-KR") -> CardScript | None:
     """
     소재에서 카드 대본을 만든다. 쓸 만한 게 안 나오면 ``None``.
@@ -82,6 +143,10 @@ def build_card_script(item: SourceItem, language: str = "ko-KR") -> CardScript |
         return None
 
     footer = _footer(item)
+    # 점수판은 대본을 다 쓴 뒤에 붙인다. 모델에게 점수까지 맡기면 무엇을 보든
+    # 4점이 나오고, 그러면 매 영상이 똑같이 끝난다.
+    scored = _score_card(item, footer, language)
+
     cards = []
     narrations = []
     for index, entry in enumerate(entries, start=1):
@@ -92,9 +157,21 @@ def build_card_script(item: SourceItem, language: str = "ko-KR") -> CardScript |
                 body=tuple(entry.get("bullets") or ()),
                 # 출처는 첫 장과 마지막 장에만 둔다. 매 장에 반복하면 읽는 데
                 # 방해가 되고, 없으면 어디서 온 이야기인지 알 수 없다.
-                footer=footer if index in (1, len(entries)) else "",
+                footer=footer if index == 1 or (index == len(entries) and not scored) else "",
             )
         )
         narrations.append(entry["narration"])
+
+    if scored:
+        card, narration = scored
+        cards.append(
+            Card(
+                index_label=f"{len(cards) + 1:02d}",
+                title=card.title,
+                scores=card.scores,
+                footer=card.footer,
+            )
+        )
+        narrations.append(narration)
 
     return CardScript(cards=tuple(cards), narrations=tuple(narrations))

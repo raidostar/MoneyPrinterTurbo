@@ -218,11 +218,18 @@ class TestBounds(unittest.TestCase):
 
 class TestAssembly(unittest.TestCase):
     def setUp(self):
-        # 대본을 만들 때 본문을 읽어 온다. 여기서 보려는 것은 조립 결과이므로
-        # 남의 서버를 부르지 않게 막아 둔다. 본문 읽기 자체는 별도로 시험한다.
-        patcher = patch.object(cardscript.enrich, "fetch_body", return_value="")
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # 대본을 만들 때 본문을 읽고 저장소를 살펴보고 점수를 매긴다. 여기서
+        # 보려는 것은 조립 결과이므로 남의 서버를 부르지 않게 막아 둔다. 각각은
+        # 따로 시험한다.
+        for target, name, value in (
+            (cardscript.enrich, "fetch_body", ""),
+            (cardscript.repo, "fetch_signals", None),
+            (cardscript.repo, "maturity", None),
+            (cardscript.llm, "judge_project", {}),
+        ):
+            patcher = patch.object(target, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _build(self, count=4, item=None):
         entries = [
@@ -260,6 +267,81 @@ class TestAssembly(unittest.TestCase):
         """하루치 소재 중 하나가 카드가 안 됐다고 나머지까지 멈출 이유가 없다."""
         with patch.object(llm, "generate_card_script", return_value=[]):
             self.assertIsNone(cardscript.build_card_script(_item()))
+
+
+class TestScoreCard(unittest.TestCase):
+    """
+    마무리는 항상 점수판이다. 완성도는 저장소를 세서 넣고 나머지는 모델이 매긴다 —
+    완성도까지 모델에게 물으면 무엇을 보든 4점이 나온다.
+    """
+
+    def _build(self, judged=None, measured=(4, "테스트 있음"), cards=3):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": f"말 {i}"}
+            for i in range(cards)
+        ]
+        judged = {"entry": (5, "한 줄 설치")} if judged is None else judged
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value=judged),
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=measured),
+        ):
+            return cardscript.build_card_script(_item())
+
+    def test_the_deck_ends_with_the_scores(self):
+        script = self._build()
+        self.assertTrue(script.cards[-1].scores)
+        self.assertFalse(script.cards[-2].scores)
+
+    def test_maturity_is_measured_not_asked_for(self):
+        """모델에게 물으면 무엇을 보든 4점이 나온다."""
+        script = self._build(measured=(2, "테스트 없음"))
+        maturity = next(s for s in script.cards[-1].scores if s.label == "완성도")
+
+        self.assertEqual(maturity.value, 2)
+        self.assertEqual(maturity.reason, "테스트 없음")
+
+    def test_a_project_we_cannot_inspect_still_gets_the_other_scores(self):
+        """저장소가 아닌 소재도 있다. 완성도만 빼고 나머지는 그대로 낸다."""
+        script = self._build(
+            measured=None, judged={"entry": (5, "설치 없음"), "reach": (2, "SF 한정")}
+        )
+        labels = [score.label for score in script.cards[-1].scores]
+
+        self.assertNotIn("완성도", labels)
+        self.assertEqual(labels, ["바로 쓰기", "쓸 자리"])
+
+    def test_one_lonely_score_is_not_a_score_card(self):
+        """비교할 것이 없는 막대 하나는 판정이 아니라 장식이다."""
+        script = self._build(measured=None, judged={"entry": (5, "한 줄")})
+        self.assertFalse(script.cards[-1].scores)
+
+    def test_the_narration_reads_the_numbers_as_words(self):
+        """합성기는 숫자를 밋밋하게 읽는다."""
+        script = self._build(measured=(3, "CI 없음"), judged={"entry": (5, "한 줄")})
+        spoken = script.narrations[-1]
+
+        self.assertIn("삼점", spoken.replace(" ", ""))
+        self.assertIn("오점", spoken.replace(" ", ""))
+
+    def test_the_score_card_is_numbered_and_credited(self):
+        script = self._build()
+        last = script.cards[-1]
+
+        self.assertEqual(last.index_label, f"{len(script.cards):02d}")
+        self.assertIn("Hacker News", last.footer)
+
+    def test_the_source_line_moves_to_the_score_card(self):
+        """두 장에 겹쳐 나오면 마지막 두 장이 같은 줄로 끝난다."""
+        script = self._build()
+        self.assertTrue(script.cards[0].footer)
+        self.assertFalse(script.cards[-2].footer)
+
+    def test_cards_and_narrations_still_line_up(self):
+        script = self._build()
+        self.assertEqual(len(script.cards), len(script.narrations))
 
 
 class TestScriptStaysPaired(unittest.TestCase):
@@ -300,3 +382,97 @@ class TestScriptStaysPaired(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScoreLabelsReadTheRightWay(unittest.TestCase):
+    """
+    라벨은 점수가 올라가는 방향과 같아야 한다. "진입장벽 5점" 은 한 줄로 설치되는
+    도구에 붙었을 때 뜻이 정반대로 읽힌다.
+    """
+
+    def test_every_axis_is_named_so_that_more_is_better(self):
+        from app.services import llm as llm_module
+
+        # 장벽·난이도·비용처럼 "높을수록 나쁜" 말이 라벨에 들어가면, 5점이 칭찬이
+        # 아니라 흠으로 읽힌다.
+        backwards = ("장벽", "난이도", "비용", "부담", "제약")
+        for key, label in llm_module.JUDGEMENT_LABELS.items():
+            with self.subTest(key=key):
+                for word in backwards:
+                    self.assertNotIn(word, label)
+
+    def test_every_axis_the_model_scores_has_a_label(self):
+        """라벨이 없으면 그 칸은 이름 없이 막대만 그려진다."""
+        from app.services import llm as llm_module
+
+        for key in llm_module.JUDGEMENT_KEYS:
+            self.assertTrue(llm_module.JUDGEMENT_LABELS.get(key))
+        self.assertTrue(llm_module.JUDGEMENT_LABELS.get("maturity"))
+
+
+class TestScoreCardStaysKorean(unittest.TestCase):
+    """
+    항목 이름과 숫자 읽기가 한국어로 박혀 있다. 다른 언어 대본에 붙이면 마지막
+    장만 한국어로 나온다.
+    """
+
+    def _build(self, language):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": f"말 {i}"}
+            for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value={"entry": (5, "한 줄")}),
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=(4, "테스트 있음")),
+        ):
+            return cardscript.build_card_script(_item(), language=language)
+
+    def test_a_korean_deck_gets_the_scores(self):
+        for language in ("ko-KR", "ko", "KO-kr"):
+            with self.subTest(language=language):
+                self.assertTrue(self._build(language).cards[-1].scores)
+
+    def test_another_language_ends_without_them(self):
+        """확인할 수 없는 번역을 지어 붙이느니 점수판 없이 끝내는 편이 낫다."""
+        for language in ("en-US", "ja-JP", "zh-CN"):
+            with self.subTest(language=language):
+                script = self._build(language)
+                self.assertFalse(script.cards[-1].scores)
+                # 점수판이 빠지면 출처는 마지막 장에 남아야 한다.
+                self.assertTrue(script.cards[-1].footer)
+
+    def test_the_model_is_not_asked_at_all_for_another_language(self):
+        """쓰지도 않을 점수에 호출을 쓸 이유가 없다."""
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": "말"} for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project") as judge,
+            patch.object(cardscript.repo, "fetch_signals") as signals,
+        ):
+            cardscript.build_card_script(_item(), language="en-US")
+
+        judge.assert_not_called()
+        signals.assert_not_called()
+
+    def test_the_language_reaches_the_judge(self):
+        entries = [
+            {"title": f"제목 {i}", "bullets": ["하나"], "narration": "말"} for i in range(3)
+        ]
+        with (
+            patch.object(cardscript.enrich, "with_body", side_effect=lambda item: item),
+            patch.object(llm, "generate_card_script", return_value=entries),
+            patch.object(llm, "judge_project", return_value={}) as judge,
+            patch.object(cardscript.repo, "fetch_signals", return_value=None),
+            patch.object(cardscript.repo, "maturity", return_value=None),
+        ):
+            # 굳어 있는 값과 다른 한국어 표기를 넘긴다. "ko-KR" 로 시험하면
+            # 값을 통째로 무시해도 통과한다.
+            cardscript.build_card_script(_item(), language="ko")
+
+        self.assertEqual(judge.call_args.kwargs["language"], "ko")

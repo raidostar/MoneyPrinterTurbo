@@ -193,3 +193,69 @@ class TestClip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScoreCard(unittest.TestCase):
+    """
+    숫자만 적으면 서로 비교가 안 된다. 막대는 어느 칸이 낮은지 한눈에 보인다.
+    """
+
+    def _render(self, scores):
+        return cardnews.render_card(
+            cardnews.Card(title="점수", scores=tuple(scores), index_label="06")
+        )
+
+    def _bar_colors(self, image, scores):
+        """가장 위 막대 줄에서 쓰인 색들."""
+        from collections import Counter
+
+        counted = Counter(image.getdata())
+        return counted
+
+    def test_a_score_out_of_range_does_not_draw_outside_the_bar(self):
+        """범위를 넘는 값이 오면 칸 밖으로 나간다."""
+        for value in (0, -3, 99, "많음", None):
+            with self.subTest(value=value):
+                score = cardnews.Score(label="완성도", value=value)
+                self.assertGreaterEqual(score.value, cardnews.MIN_SCORE)
+                self.assertLessEqual(score.value, cardnews.MAX_SCORE)
+
+    def test_empty_cells_are_drawn_too(self):
+        """채운 칸만 그리면 몇 점 만점인지 알 수 없다."""
+        counted = self._bar_colors(
+            self._render([cardnews.Score(label="완성도", value=2, reason="테스트 없음")]),
+            None,
+        )
+        empty = tuple(int(cardnews.EMPTY_BAR_COLOR[i : i + 2], 16) for i in (1, 3, 5))
+        accent = tuple(int(cardnews.ACCENT_COLOR[i : i + 2], 16) for i in (1, 3, 5))
+
+        self.assertGreater(counted[empty], 0)
+        self.assertGreater(counted[accent], 0)
+
+    def test_a_higher_score_fills_more(self):
+        accent = tuple(int(cardnews.ACCENT_COLOR[i : i + 2], 16) for i in (1, 3, 5))
+        low = self._bar_colors(self._render([cardnews.Score("완성도", 1)]), None)[accent]
+        high = self._bar_colors(self._render([cardnews.Score("완성도", 5)]), None)[accent]
+        self.assertGreater(high, low)
+
+    def test_too_many_scores_are_dropped(self):
+        """칸이 늘어나면 아래 안전 영역을 넘어 잘린다."""
+        card = cardnews.Card(
+            title="점수", scores=tuple(cardnews.Score(f"항목{i}", 3) for i in range(20))
+        )
+        self.assertLessEqual(len(card.scores), cardnews.MAX_SCORES)
+
+    def test_the_score_card_renders_at_the_full_size(self):
+        image = self._render(
+            [
+                cardnews.Score("완성도", 4, "테스트 있음"),
+                cardnews.Score("바로 쓰기", 5, "cargo install 한 줄"),
+                cardnews.Score("새로움", 3, "대안 있음"),
+                cardnews.Score("쓸 자리", 2, "Linux ARM 한정"),
+            ]
+        )
+        self.assertEqual(image.size, cardnews.CANVAS_SIZE)
+
+    def test_a_long_reason_does_not_run_off_the_card(self):
+        score = cardnews.Score("완성도", 3, "가" * 500)
+        self.assertLessEqual(len(score.reason), cardnews.MAX_SCORE_REASON_LENGTH)

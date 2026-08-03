@@ -366,6 +366,18 @@ class TestSecrets(unittest.TestCase):
 class TestDailyFlow(unittest.TestCase):
     """매일 후보를 보내고 고른 것만 만든다."""
 
+    def setUp(self):
+        # 후보를 보여 줄 때 소재를 한국어로 옮기고 저장소를 살펴본다. 여기서
+        # 보려는 것은 목록 자체라, 밖으로 나가지 않게 막아 둔다.
+        digest = patch.object(bot.llm, "digest_candidates", return_value={})
+        signals = patch.object(
+            bot.repo, "fetch_signals", return_value=bot.repo.RepoSignals()
+        )
+        digest.start()
+        signals.start()
+        self.addCleanup(digest.stop)
+        self.addCleanup(signals.stop)
+
     def _bot(self):
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
@@ -400,7 +412,7 @@ class TestDailyFlow(unittest.TestCase):
         shorts = self._bot()
         shorts.candidates = {"tok": SourceItem(source="hackernews", item_id="1", title="글")}
         script = SimpleNamespace(
-            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(index_label="01", title="제목", body=("하나",)),),
             narrations=("말",),
             narration_text="말",
         )
@@ -425,7 +437,7 @@ class TestDailyFlow(unittest.TestCase):
             url="https://example.com/x",
         )
         script = SimpleNamespace(
-            cards=(SimpleNamespace(title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(title="제목", body=("하나",)),),
             narrations=("말",),
         )
         made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=1)
@@ -707,6 +719,165 @@ class TestDailySchedule(unittest.TestCase):
                 offer.assert_not_called()
 
 
+class TestCandidateList(unittest.TestCase):
+    """
+    소재는 대부분 영어로 올라온다. 제목만 그대로 보내면 고르는 사람이 매번 링크를
+    열어 봐야 하고, 그러면 목록을 보내는 의미가 없다.
+    """
+
+    def _offer(self, digest=None, signals=None, titles=("Show HN: A tiny thing",)):
+        from app.services.daily import DailyPick, DailyRun
+        from app.services.sources.base import SourceItem
+
+        run = DailyRun(
+            picks=tuple(
+                DailyPick(
+                    item=SourceItem(
+                        source="hackernews",
+                        item_id=str(index),
+                        title=title,
+                        url=f"https://github.com/someone/thing{index}",
+                    ),
+                    reason="117 points",
+                )
+                for index, title in enumerate(titles)
+            )
+        )
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.daily, "pick_items", return_value=run),
+            patch.object(bot.llm, "digest_candidates", return_value=digest or {}),
+            patch.object(
+                bot.repo,
+                "fetch_signals",
+                return_value=signals or bot.repo.RepoSignals(),
+            ),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._offer_today()
+        return " ".join(str(call.args[1]) for call in send.call_args_list)
+
+    def test_the_list_is_written_in_korean(self):
+        said = self._offer(
+            digest={1: {"title": "Kakehashi — Linux에서 macOS 실행", "summary": "JIT 없이 Mach-O 실행"}}
+        )
+        self.assertIn("Linux에서 macOS 실행", said)
+        self.assertIn("JIT 없이 Mach-O 실행", said)
+
+    def test_a_candidate_we_could_not_translate_still_shows_up(self):
+        """옮기지 못했다고 목록에서 빼면, 그 소재는 영영 안 보인다."""
+        said = self._offer(digest={}, titles=("Show HN: A tiny thing",))
+        self.assertIn("Show HN: A tiny thing", said)
+
+    def test_the_list_says_how_alive_the_project_is(self):
+        """별 수와 마지막 커밋은 열어 보지 않고 판단할 수 있는 값이다."""
+        said = self._offer(
+            signals=bot.repo.RepoSignals(
+                seen=True, stars=292, language="Rust", idle_days=0
+            )
+        )
+        self.assertIn("★292", said)
+        self.assertIn("Rust", said)
+
+    def test_translating_happens_once_for_the_whole_list(self):
+        """건마다 부르면 후보 다섯 개에 다섯 번을 쓴다."""
+        from app.services.daily import DailyPick, DailyRun
+        from app.services.sources.base import SourceItem
+
+        run = DailyRun(
+            picks=tuple(
+                DailyPick(item=SourceItem(source="hackernews", item_id=str(i), title=f"글 {i}"))
+                for i in range(5)
+            )
+        )
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.daily, "pick_items", return_value=run),
+            patch.object(bot.llm, "digest_candidates", return_value={}) as digest,
+            patch.object(bot.repo, "fetch_signals", return_value=bot.repo.RepoSignals()),
+            patch.object(bot, "_send"),
+        ):
+            shorts._offer_today()
+
+        digest.assert_called_once()
+
+
+class TestScoresAreShownAndKept(unittest.TestCase):
+    """
+    화면에 나가는 판정은 승인 전에 보여야 하고, 나간 뒤에는 기록에 남아야 한다.
+    """
+
+    def _script(self):
+        return SimpleNamespace(
+            cards=(
+                bot.cardnews.Card(index_label="01", title="여는 장", body=("하나",)),
+                bot.cardnews.Card(
+                    index_label="02",
+                    title="점수",
+                    scores=(
+                        bot.cardnews.Score("완성도", 4, "테스트 있음"),
+                        bot.cardnews.Score("바로 쓰기", 2, "GPU 필요"),
+                    ),
+                ),
+            ),
+            narrations=("말", "정리하면"),
+            narration_text="말 정리하면",
+        )
+
+    def test_the_approval_message_shows_the_scores(self):
+        """
+        "점수" 한 글자만 보고 승인하면, 못 본 판정이 붙은 영상이 그대로 계정에
+        올라간다.
+        """
+        from app.services.sources.base import SourceItem
+
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.cardscript, "build_card_script", return_value=self._script()),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._draft_cards(SourceItem(source="hackernews", item_id="1", title="글"))
+
+        said = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("완성도", said)
+        self.assertIn("테스트 있음", said)
+        self.assertIn("GPU 필요", said)
+        # 값도 보여야 한다. 이름만 보고는 몇 점인지 알 수 없다.
+        self.assertIn("4", said)
+        self.assertIn("2", said)
+
+    def test_the_manifest_keeps_the_scores_that_went_out(self):
+        """남기지 않으면 어떤 점수를 왜 줬는지 나중에 되짚을 수 없다."""
+        from app.services.sources.base import SourceItem
+
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        item = SourceItem(source="hackernews", item_id="1", title="글")
+        made = SimpleNamespace(video_path="out.mp4", duration=30.0, card_count=2)
+        with (
+            patch.object(bot.task_artifacts, "write_script_data") as write,
+            patch.object(bot.cardvideo, "render_card_news", return_value=made),
+            patch.object(bot.daily, "mark_used"),
+            patch.object(bot, "_send_video"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_offer_publish"),
+        ):
+            shorts._render_cards(item, self._script())
+
+        cards = write.call_args.args[1]["cards"]
+        self.assertEqual(cards[0]["scores"], [])
+        self.assertEqual(
+            cards[1]["scores"],
+            [
+                {"label": "완성도", "value": 4, "reason": "테스트 있음"},
+                {"label": "바로 쓰기", "value": 2, "reason": "GPU 필요"},
+            ],
+        )
+
+
 class TestPublishing(unittest.TestCase):
     """만든 영상을 계정에 올린다."""
 
@@ -847,7 +1018,7 @@ class TestPublishing(unittest.TestCase):
         shorts = self._bot()
         item = SourceItem(source="hackernews", item_id="1", title="어떤 도구")
         script = SimpleNamespace(
-            cards=(SimpleNamespace(index_label="01", title="제목", body=("하나",)),),
+            cards=(bot.cardnews.Card(index_label="01", title="제목", body=("하나",)),),
             narrations=("말",),
         )
         rendered = SimpleNamespace(video_path="/tmp/cardnews.mp4", duration=30, card_count=1)

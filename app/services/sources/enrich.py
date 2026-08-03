@@ -10,6 +10,7 @@
 """
 
 import ipaddress
+import json
 import re
 import socket
 from dataclasses import replace
@@ -24,6 +25,7 @@ from app.services.sources.base import MAX_TEXT_LENGTH, SourceItem
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 512 * 1024
 MAX_REDIRECTS = 3
+GITHUB_API_HOST = "api.github.com"
 GITHUB_README = "https://api.github.com/repos/{owner}/{repo}/readme"
 # 이 헤더가 없으면 GitHub 은 base64 를 담은 JSON 을 준다. 읽을 글이 필요하다.
 GITHUB_RAW_ACCEPT = "application/vnd.github.raw"
@@ -127,7 +129,7 @@ class _PinnedAdapter(requests.adapters.HTTPAdapter):
         return host_params, pool_kwargs
 
 
-def _read_bounded_text(response) -> str:
+def _read_bounded_text(response, limit: int = MAX_BODY_BYTES) -> str:
     """본문을 상한까지만 읽는다. 읽을 글이 아니면 빈 문자열."""
     content_type = str(response.headers.get("Content-Type", "")).lower()
     # 종류를 밝히지 않은 응답도 여기서 걸린다. 무엇인지 모르는 바이트를 글자로
@@ -136,7 +138,7 @@ def _read_bounded_text(response) -> str:
         logger.info(f"skipping a body of an unusable type: {content_type[:60] or '(none)'}")
         return ""
 
-    raw = response.raw.read(MAX_BODY_BYTES, decode_content=True)
+    raw = response.raw.read(max(1, int(limit)), decode_content=True)
     return raw.decode("utf-8", errors="replace")
 
 
@@ -150,7 +152,19 @@ def _pinned_session(url: str, hostname: str, address: str) -> requests.Session:
     return session
 
 
-def _get(url: str, accept: str = "") -> str:
+def _github_token() -> str:
+    """
+    GitHub API 토큰. 없으면 빈 문자열.
+
+    없어도 돈다. 비인증은 시간당 60번이라 하루 한 번 도는 데는 모자라지 않지만,
+    후보 다섯 건에 열다섯 번을 쓰므로 몇 번 다시 돌리면 바닥난다.
+    """
+    from app.config import config
+
+    return str(config.app.get("github_token", "") or "").strip()
+
+
+def _get(url: str, accept: str = "", limit: int = MAX_BODY_BYTES) -> str:
     """
     주소 하나를 읽어 본문을 돌려준다. 못 읽으면 빈 문자열.
 
@@ -161,15 +175,24 @@ def _get(url: str, accept: str = "") -> str:
     if accept:
         headers["Accept"] = accept
 
+    token = _github_token()
+
     for _ in range(MAX_REDIRECTS + 1):
+        request_headers = {**headers, "Host": ""}
+        # 토큰은 GitHub API 에만 보낸다. 매번 다시 본다 — 리다이렉트를 따라가다
+        # 다른 곳에 그대로 보내면 남의 서버가 302 한 번으로 토큰을 받아 간다.
+        if token and urlparse(url).netloc.lower() == GITHUB_API_HOST:
+            request_headers["Authorization"] = f"Bearer {token}"
+
         try:
             hostname, address = resolve_public_url(url)
+            request_headers["Host"] = hostname
             response = _pinned_session(url, hostname, address).get(
                 url,
                 timeout=REQUEST_TIMEOUT_SECONDS,
                 stream=True,
                 allow_redirects=False,
-                headers={**headers, "Host": hostname},
+                headers=request_headers,
             )
         except UnsafeUrl as exc:
             logger.warning(f"refusing to read a source body: {exc}")
@@ -193,13 +216,30 @@ def _get(url: str, accept: str = "") -> str:
             if response.status_code >= 400:
                 logger.info(f"a source body responded {response.status_code}")
                 return ""
-            return _read_bounded_text(response)
+            return _read_bounded_text(response, limit)
 
     logger.warning("too many redirects while reading a source body")
     return ""
 
 
-def _github_repo(url: str) -> tuple[str, str] | None:
+def get_json(url: str, accept: str = "", limit: int = MAX_BODY_BYTES):
+    """
+    주소 하나를 읽어 JSON 으로 만든다. 못 읽거나 JSON 이 아니면 ``None``.
+
+    본문 읽기와 같은 길을 쓴다 — 공인 주소 확인, 확인한 주소로 연결, 리다이렉트
+    재검사, 크기 상한이 그대로 걸린다.
+    """
+    raw = _get(url, accept=accept, limit=limit)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        logger.info("a source returned something that is not json")
+        return None
+
+
+def github_repo(url: str) -> tuple[str, str] | None:
     """
     GitHub 저장소 첫 화면이면 ``(owner, repo)``. 아니면 ``None``.
 
@@ -244,7 +284,7 @@ def fetch_body(url: str, limit: int = MAX_TEXT_LENGTH) -> str:
     if not url:
         return ""
 
-    repository = _github_repo(url)
+    repository = github_repo(url)
     if repository:
         owner, repo = repository
         body = _get(
