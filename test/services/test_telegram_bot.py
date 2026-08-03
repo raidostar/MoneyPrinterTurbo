@@ -445,6 +445,48 @@ class TestDailyFlow(unittest.TestCase):
         self.assertEqual(payload["cards"][0]["narration"], "말")
         self.assertIn("params", payload)
 
+    def test_a_quiet_refresh_drops_yesterdays_buttons(self):
+        """
+        새 목록이 없다고 예전 목록을 남겨 두면, 어제 버튼이 오늘도 먹혀 이미 만든
+        소재를 다시 만든다.
+        """
+        from app.services.daily import DailyRun
+        from app.services.sources.base import SourceItem
+
+        for run in (DailyRun(), DailyRun(source_reachable=False)):
+            with self.subTest(run=run):
+                shorts = self._bot()
+                shorts.candidates = {
+                    "old": SourceItem(source="hackernews", item_id="1", title="어제 글")
+                }
+                with (
+                    patch.object(bot.daily, "pick_items", return_value=run),
+                    patch.object(bot, "_send"),
+                ):
+                    shorts._offer_today()
+
+                self.assertEqual(shorts.candidates, {})
+
+    def test_a_token_cannot_be_used_twice(self):
+        """
+        만든 뒤에 같은 버튼을 또 누르면 같은 것을 다시 만든다. 모델 호출과
+        렌더링 비용이 그대로 두 번 든다.
+        """
+        from app.services.sources.base import SourceItem
+
+        shorts = self._bot()
+        shorts.candidates = {"tok": SourceItem(source="hackernews", item_id="1", title="글")}
+        script = SimpleNamespace(cards=(), narrations=(), narration_text="말")
+        with (
+            patch.object(bot.cardscript, "build_card_script", return_value=script) as build,
+            patch.object(bot, "_send"),
+            patch.object(bot, "_answer_callback"),
+        ):
+            shorts.handle_update(_callback(111, "pick:tok"))
+            shorts.handle_update(_callback(111, "pick:tok"))
+
+        self.assertEqual(build.call_count, 1)
+
     def test_a_button_from_a_previous_list_is_refused(self):
         shorts = self._bot()
         shorts.candidates = {}
@@ -578,6 +620,23 @@ class TestDailySchedule(unittest.TestCase):
             self.assertFalse(shorts.maybe_run_daily(self._at(9)))
 
         save.assert_not_called()
+
+    def test_a_storage_failure_does_not_resend_all_day(self):
+        """
+        날짜를 못 쓰면 다음 폴링이 기록이 없다고 보고 또 보낸다. 저장 실패가
+        도배로 번지면 안 된다.
+        """
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "load_last_run", return_value=""),
+            patch.object(bot.daily, "save_last_run", return_value=False),
+            patch.object(shorts, "_offer_today", return_value=True) as offer,
+        ):
+            self.assertTrue(shorts.maybe_run_daily(self._at(9)))
+            self.assertFalse(shorts.maybe_run_daily(self._at(10)))
+
+        self.assertEqual(offer.call_count, 1)
 
     def test_restarting_does_not_resend_todays_list(self):
         """메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다."""

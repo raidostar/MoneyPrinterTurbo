@@ -98,8 +98,16 @@ class TestNotRepeatingYesterday(unittest.TestCase):
         """메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다."""
         with _Storage():
             self.assertEqual(daily.load_last_run(), "")
-            daily.save_last_run("2026-08-03")
+            self.assertTrue(daily.save_last_run("2026-08-03"))
             self.assertEqual(daily.load_last_run(), "2026-08-03")
+
+    def test_a_failed_write_says_so(self):
+        """
+        조용히 실패하면 다음 실행이 기록이 없다고 판단해 같은 일을 다시 한다.
+        """
+        with _Storage():
+            with patch.object(daily.json, "dump", side_effect=OSError("disk full")):
+                self.assertFalse(daily.save_last_run("2026-08-03"))
 
 
 class TestTheRecordSurvivesTrouble(unittest.TestCase):

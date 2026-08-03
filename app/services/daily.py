@@ -56,12 +56,15 @@ def _state_path() -> str:
     return os.path.join(utils.storage_dir(create=True), STATE_FILE)
 
 
-def _write_json(path: str, payload) -> None:
+def _write_json(path: str, payload) -> bool:
     """
-    임시 파일에 쓰고 바꿔치기한다.
+    임시 파일에 쓰고 바꿔치기한다. 성공하면 ``True``.
 
     같은 파일에 바로 쓰면 도중에 멈췄을 때 반쯤 쓰인 파일이 남고, 다음 실행이
     그걸 읽지 못해 기록을 통째로 잃는다.
+
+    성공 여부를 돌려주는 이유는, 쓰지 못했다는 사실을 부르는 쪽이 알아야 하기
+    때문이다. 조용히 실패하면 다음 실행이 기록이 없다고 판단해 같은 일을 다시 한다.
     """
     handle = None
     temporary = ""
@@ -77,8 +80,10 @@ def _write_json(path: str, payload) -> None:
         handle = None
         os.replace(temporary, path)
         temporary = ""
+        return True
     except OSError as exc:
         logger.warning(f"could not save {os.path.basename(path)}: {type(exc).__name__}")
+        return False
     finally:
         if handle is not None:
             handle.close()
@@ -103,8 +108,9 @@ def load_last_run() -> str:
     return value if isinstance(value, str) else ""
 
 
-def save_last_run(date: str) -> None:
-    _write_json(_state_path(), {"last_daily_date": str(date)})
+def save_last_run(date: str) -> bool:
+    """마지막으로 후보를 보낸 날짜를 남긴다. 남기지 못하면 ``False``."""
+    return _write_json(_state_path(), {"last_daily_date": str(date)})
 
 
 def _key(item: SourceItem) -> str:

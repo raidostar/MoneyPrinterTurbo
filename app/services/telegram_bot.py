@@ -209,6 +209,9 @@ class ShortsBot:
         self._lock = threading.Lock()
         # 오늘 보여 준 후보. 버튼을 누르면 여기서 찾는다.
         self.candidates: dict[str, object] = {}
+        # 기록 파일에 못 쓴 날을 위한 대비. 저장이 실패해도 이번 실행 동안에는
+        # 같은 목록을 다시 보내지 않는다.
+        self.offered_date = ""
 
     # ---- 매일 ----
 
@@ -238,14 +241,21 @@ class ShortsBot:
         now = now or time.localtime()
         today = time.strftime("%Y-%m-%d", now)
         # 파일에서 읽는다. 메모리에만 두면 봇을 다시 켤 때마다 그날 목록이 또 나간다.
-        if daily.load_last_run() == today or now.tm_hour < hour:
+        if now.tm_hour < hour:
+            return False
+        if self.offered_date == today or daily.load_last_run() == today:
             return False
 
         # 마친 다음에 날짜를 적는다. 먼저 적으면 잠깐의 장애가 그날의 모든
         # 재시도를 막는다.
         if not self._offer_today():
             return False
-        daily.save_last_run(today)
+
+        # 못 써도 이번 실행 동안에는 다시 보내지 않는다. 저장 실패가 폴링마다
+        # 같은 목록을 보내는 일로 번지면 안 된다.
+        self.offered_date = today
+        if not daily.save_last_run(today):
+            logger.warning("could not record today's daily run; it may repeat on restart")
         return True
 
     # ---- 오늘의 소재 ----
@@ -258,6 +268,9 @@ class ShortsBot:
         둘을 같이 다루면 한쪽은 하루를 통째로 건너뛰고 다른 쪽은 폴링마다
         같은 안내를 보낸다.
         """
+        # 새로 훑기 전에 지난 목록을 버린다. 남겨 두면 어제 버튼이 오늘도 먹혀,
+        # 이미 만든 소재를 다시 만들게 된다.
+        self.candidates = {}
         _send(self.chat_id, "오늘 올라온 것 보는 중…")
         run = daily.pick_items(limit=DAILY_CANDIDATES)
         if not run.source_reachable:
@@ -269,7 +282,6 @@ class ShortsBot:
             _send(self.chat_id, "새로 다룰 만한 게 없어요. 내일 다시 볼게요.")
             return True
 
-        self.candidates = {}
         for index, pick in enumerate(run.picks, start=1):
             token = uuid4().hex[:8]
             self.candidates[token] = pick.item
@@ -477,7 +489,9 @@ class ShortsBot:
         action, _, draft_id = str(callback.get("data", "") or "").partition(":")
 
         if action == "pick":
-            item = self.candidates.get(draft_id)
+            # 한 번 고른 버튼은 쓴다. 남겨 두면 만든 뒤에 또 눌러 같은 것을
+            # 다시 만들게 된다.
+            item = self.candidates.pop(draft_id, None)
             if item is None:
                 _send(self.chat_id, "지난 목록의 버튼이에요. /오늘 로 다시 불러 주세요.")
                 return
