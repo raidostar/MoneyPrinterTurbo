@@ -165,9 +165,16 @@ class TestFailures(unittest.TestCase):
         self.assertIsNone(_fetch({"hits": "nope"}))
         self.assertIsNone(_fetch(["not", "an", "object"]))
 
-    def test_no_matching_stories_is_an_empty_list_not_a_failure(self):
-        """조건에 맞는 글이 없는 날도 정상적인 결과다."""
+    def test_a_quiet_day_and_an_outage_look_different(self):
+        """
+        조건에 맞는 글이 없는 날도 정상적인 결과다. 장애와 같은 값으로 돌려주면
+        부르는 쪽이 둘을 구분하지 못해, 조용한 날마다 계속 다시 물어본다.
+        """
         self.assertEqual(_fetch({"hits": []}), [])
+        with patch.object(
+            hackernews.requests, "get", side_effect=RuntimeError("no network")
+        ):
+            self.assertIsNone(hackernews.fetch_items())
 
 
 if __name__ == "__main__":

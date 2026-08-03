@@ -44,6 +44,9 @@ MAX_SCRIPT_LENGTH = 3500
 DAILY_CANDIDATES = 3
 # 매일 후보를 보내는 시각(로컬 24시간). 비워 두면 /오늘 을 직접 칠 때만 돈다.
 DEFAULT_DAILY_HOUR = ""
+# 소스에 못 닿았을 때 다시 볼 때까지 기다리는 시간. 폴링은 초 단위로 도는데
+# 그 주기로 다시 물어보면, 장애가 길어질수록 요청과 안내가 하루 종일 쌓인다.
+DAILY_RETRY_SECONDS = 15 * 60
 
 
 class TelegramConfigError(RuntimeError):
@@ -212,6 +215,7 @@ class ShortsBot:
         # 기록 파일에 못 쓴 날을 위한 대비. 저장이 실패해도 이번 실행 동안에는
         # 같은 목록을 다시 보내지 않는다.
         self.offered_date = ""
+        self.retry_daily_after = 0.0
 
     # ---- 매일 ----
 
@@ -245,10 +249,15 @@ class ShortsBot:
             return False
         if self.offered_date == today or daily.load_last_run() == today:
             return False
+        # 실패한 뒤에는 잠시 쉰다. 폴링 주기로 다시 물어보면 장애가 이어지는 동안
+        # 요청과 안내가 계속 쌓인다.
+        if time.monotonic() < self.retry_daily_after:
+            return False
 
         # 마친 다음에 날짜를 적는다. 먼저 적으면 잠깐의 장애가 그날의 모든
         # 재시도를 막는다.
         if not self._offer_today():
+            self.retry_daily_after = time.monotonic() + DAILY_RETRY_SECONDS
             return False
 
         # 못 써도 이번 실행 동안에는 다시 보내지 않는다. 저장 실패가 폴링마다

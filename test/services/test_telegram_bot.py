@@ -655,16 +655,35 @@ class TestDailySchedule(unittest.TestCase):
         다음에 날짜를 적어야 한다.
         """
         shorts = self._bot("9")
+        clock = iter([0.0, 0.0, bot.DAILY_RETRY_SECONDS + 1, bot.DAILY_RETRY_SECONDS + 1])
         with (
             patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
             patch.object(bot.daily, "load_last_run", return_value=""),
             patch.object(bot.daily, "save_last_run"),
+            patch.object(bot.time, "monotonic", side_effect=lambda: next(clock)),
             patch.object(shorts, "_offer_today", side_effect=[False, True]) as offer,
         ):
             self.assertFalse(shorts.maybe_run_daily(self._at(9)))
             self.assertTrue(shorts.maybe_run_daily(self._at(10)))
 
         self.assertEqual(offer.call_count, 2)
+
+    def test_an_outage_is_not_retried_every_poll(self):
+        """
+        폴링은 초 단위로 돈다. 그 주기로 다시 물어보면 장애가 이어지는 동안
+        요청과 안내가 하루 종일 쌓인다.
+        """
+        shorts = self._bot("9")
+        with (
+            patch.dict(bot.config.telegram, {"daily_hour": "9"}, clear=False),
+            patch.object(bot.daily, "load_last_run", return_value=""),
+            patch.object(bot.time, "monotonic", return_value=0.0),
+            patch.object(shorts, "_offer_today", return_value=False) as offer,
+        ):
+            for _ in range(20):
+                self.assertFalse(shorts.maybe_run_daily(self._at(9)))
+
+        self.assertEqual(offer.call_count, 1)
 
     def test_no_hour_means_no_schedule(self):
         """정하지 않았으면 직접 칠 때만 돈다."""
