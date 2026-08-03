@@ -285,6 +285,21 @@ class TestNarrationRetry(unittest.TestCase):
         logged = " ".join(str(call.args[0]) for call in warning.call_args_list)
         self.assertNotIn("hunter2", logged)
 
+    def test_a_stale_file_from_a_previous_run_is_not_reused(self):
+        """
+        같은 task 를 다시 돌리면 지난 실행의 파일이 남아 있다. 합성이 조용히
+        실패했을 때 그 파일이 있으면, 예전 소리가 새 카드에 붙는다.
+        """
+        with tempfile.TemporaryDirectory() as work:
+            target = os.path.join(work, "card.mp3")
+            with open(target, "wb") as stale:
+                stale.write(b"old audio")
+
+            with patch.object(cardvideo.voice, "tts", return_value=object()):
+                seconds = cardvideo._narrate("말", target, _params())
+
+        self.assertEqual(seconds, 0.0)
+
     def test_a_failed_synthesis_is_retried(self):
         """일시적인 실패 하나로 그 카드가 조용해지지 않게 한다."""
         params = _params()
@@ -325,6 +340,9 @@ class TestOutput(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.card_count, 3)
+        # 합쳐진 오디오 경로를 따로 알려주지 않는다. 조각 하나를 전체인 척 내놓는
+        # 필드가 있으면 받는 쪽이 그걸 나레이션 전체로 쓴다.
+        self.assertFalse(hasattr(result, "audio_path"))
         self.assertAlmostEqual(result.duration, 6.0)
         self.assertTrue(result.video_path.endswith("cardnews.mp4"))
 

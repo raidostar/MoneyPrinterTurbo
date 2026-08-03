@@ -29,7 +29,6 @@ FALLBACK_CARD_SECONDS = 2.5
 @dataclass(frozen=True)
 class CardVideoResult:
     video_path: str
-    audio_path: str
     duration: float
     card_count: int
 
@@ -77,6 +76,12 @@ def _narrate(text: str, target_path: str, params) -> float:
     나머지는 그대로 나온다.
     """
     for attempt in range(MAX_NARRATION_ATTEMPTS):
+        # 같은 task 를 다시 돌리면 지난 실행의 파일이 그 자리에 남아 있다. 지우지
+        # 않으면, 합성이 조용히 실패했을 때 예전 소리를 새 카드에 붙이게 된다.
+        try:
+            os.remove(target_path)
+        except OSError:
+            pass
         try:
             # 음량은 아래에서 클립에 한 번만 건다. 여기서도 걸면 제공자에 따라 두 번
             # 곱해져, 0.2 를 넣은 사람이 0.04 를 듣게 된다.
@@ -191,7 +196,6 @@ def render_card_news(
     )
     return CardVideoResult(
         video_path=video_path,
-        audio_path=next((path for path in narration_paths if path), ""),
         duration=duration,
         card_count=len(script.cards),
     )
