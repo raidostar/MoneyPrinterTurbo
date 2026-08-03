@@ -18,6 +18,7 @@ from moviepy import AudioFileClip
 from app.services import bgm as bgm_service
 from app.services import cardnews, llm, video as video_service, voice
 from app.services.cardscript import CardScript
+from app.utils import utils
 
 SILENCE_FPS = 44100
 
@@ -106,17 +107,21 @@ def _narrate(text: str, target_path: str, params) -> float:
 
 
 def render_card_news(
-    task_id: str, script: CardScript, params, output_dir: str
+    task_id: str, script: CardScript, params
 ) -> CardVideoResult | None:
     """
     카드 대본으로 영상 하나를 만든다. 만들지 못하면 ``None``.
+
+    출력 위치는 받지 않고 task 에서 유도한다. 경로를 인자로 받으면 그 값을 검사할
+    책임이 생기고, 여기서 만드는 파일은 지우고 덮어쓰는 것들이라 잘못된 위치를
+    받으면 남의 파일을 건드린다.
 
     ``params`` 는 기존 영상 파라미터를 그대로 쓴다. 음성, 배속, BGM 설정이 이미
     거기 있고, 카드뉴스라고 다른 값을 쓸 이유가 없다.
     """
     from moviepy import CompositeAudioClip, afx, concatenate_audioclips
 
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = utils.task_dir(task_id)
     durations: list[float] = []
     # 경로가 ``None`` 이면 그 자리는 무음이다.
     narration_paths: list[str | None] = []

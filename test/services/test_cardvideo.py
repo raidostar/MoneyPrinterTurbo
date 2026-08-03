@@ -20,6 +20,16 @@ def _script(count=3):
 
 
 @contextmanager
+def _task_dir():
+    """
+    출력 위치는 task 저장소에서 나온다. 테스트는 그 뿌리만 임시 디렉터리로 돌린다.
+    """
+    with tempfile.TemporaryDirectory() as work:
+        with patch.object(cardvideo.utils, "task_dir", return_value=work):
+            yield work
+
+
+@contextmanager
 def _silent_moviepy(clip_duration=7.0):
     """
     moviepy 는 함수 안에서 import 된다. 모듈 속성이 아니라 moviepy 쪽을 갈아야
@@ -60,8 +70,8 @@ class TestNarrationDrivesTiming(unittest.TestCase):
         with patch.object(
             cardvideo, "_narrate", side_effect=lambda *a, **k: next(lengths)
         ), _silent_moviepy() as build:
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         self.assertEqual(build.call_args.args[1], [1.0, 4.0, 2.0])
 
@@ -73,8 +83,8 @@ class TestNarrationDrivesTiming(unittest.TestCase):
         with patch.object(
             cardvideo, "_narrate", return_value=0.0
         ), _silent_moviepy(7.5) as build:
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         self.assertEqual(
             build.call_args.args[1], [cardvideo.FALLBACK_CARD_SECONDS] * 3
@@ -86,8 +96,8 @@ class TestNarrationDrivesTiming(unittest.TestCase):
             cards=(Card(title="하나"), Card(title="둘")), narrations=("", "   ")
         )
         with patch.object(cardvideo, "_narrate") as narrate, _silent_moviepy(5.0):
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", script, _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", script, _params())
 
         narrate.assert_not_called()
 
@@ -109,8 +119,8 @@ class TestTimelineStaysAligned(unittest.TestCase):
         ):
             audio.return_value.duration = 2.0
             audio.return_value.__enter__.return_value = audio.return_value
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         # 소리가 난 카드 둘은 파일에서, 실패한 하나는 무음으로. 합쳐서 셋이어야
         # 카드와 순서가 맞는다.
@@ -129,8 +139,8 @@ class TestTimelineStaysAligned(unittest.TestCase):
             patch.object(cardvideo, "_narrate", return_value=0.3),
             _silent_moviepy(1.5) as build,
         ):
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         for seconds in build.call_args.args[1]:
             self.assertGreaterEqual(seconds, cardnews.MIN_CARD_SECONDS)
@@ -141,8 +151,8 @@ class TestTimelineStaysAligned(unittest.TestCase):
             patch.object(cardvideo, "_narrate", return_value=5_000.0),
             _silent_moviepy(60.0) as build,
         ):
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(1), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(1), _params())
 
         self.assertEqual(build.call_args.args[1], [cardnews.MAX_CARD_SECONDS])
 
@@ -157,8 +167,8 @@ class TestTimelineStaysAligned(unittest.TestCase):
             _silent_moviepy(15.0),
             patch("moviepy.concatenate_audioclips"),
         ):
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         # 모의 클립은 2 초, 카드는 5 초. 매번 3 초씩 채워야 한다.
         self.assertTrue(silence.called, "조각을 카드 길이에 맞추지 않았다")
@@ -232,8 +242,8 @@ class TestTimelineStaysAligned(unittest.TestCase):
             _silent_moviepy(6.0),
             patch.object(cardvideo, "AudioFileClip", side_effect=make_clip),
         ):
-            with tempfile.TemporaryDirectory() as work:
-                cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                cardvideo.render_card_news("t", _script(3), _params())
 
         self.assertEqual(len(opened), 3)
         for clip in opened:
@@ -339,8 +349,8 @@ class TestOutput(unittest.TestCase):
         with patch.object(
             cardvideo, "_narrate", return_value=2.0
         ), _silent_moviepy(6.0):
-            with tempfile.TemporaryDirectory() as work:
-                result = cardvideo.render_card_news("t", _script(3), _params(), work)
+            with _task_dir():
+                result = cardvideo.render_card_news("t", _script(3), _params())
 
         self.assertIsNotNone(result)
         self.assertEqual(result.card_count, 3)
@@ -352,10 +362,30 @@ class TestOutput(unittest.TestCase):
 
     def test_a_script_with_no_cards_makes_nothing(self):
         script = CardScript(cards=(), narrations=())
-        with tempfile.TemporaryDirectory() as work:
-            self.assertIsNone(
-                cardvideo.render_card_news("t", script, _params(), work)
-            )
+        with _task_dir():
+            self.assertIsNone(cardvideo.render_card_news("t", script, _params()))
+
+
+class TestOutputLocation(unittest.TestCase):
+    def test_the_output_location_comes_from_the_task(self):
+        """
+        경로를 인자로 받으면 그 값을 검사할 책임이 생긴다. 여기서 만드는 파일은
+        지우고 덮어쓰는 것들이라, 잘못된 위치를 받으면 남의 파일을 건드린다.
+        """
+        import inspect
+
+        signature = inspect.signature(cardvideo.render_card_news)
+        self.assertNotIn("output_dir", signature.parameters)
+
+    def test_everything_is_written_under_the_task_directory(self):
+        with (
+            patch.object(cardvideo, "_narrate", return_value=2.0),
+            _silent_moviepy(6.0),
+        ):
+            with _task_dir() as work:
+                result = cardvideo.render_card_news("t", _script(3), _params())
+
+        self.assertTrue(result.video_path.startswith(work))
 
 
 if __name__ == "__main__":
