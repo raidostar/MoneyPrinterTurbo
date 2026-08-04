@@ -13,6 +13,7 @@ import time
 import unicodedata
 from datetime import datetime
 from typing import Union
+from unicodedata import east_asian_width
 from xml.sax.saxutils import escape, unescape
 
 import edge_tts
@@ -1747,8 +1748,15 @@ BREAK_ENDINGS = (
 
 
 def _display_width(text: str) -> int:
-    """화면에서 차지하는 폭. 한글 한 글자를 1 로 본다."""
-    return sum(1 if "가" <= char <= "힣" else 0.5 for char in text) // 1
+    """
+    화면에서 차지하는 폭. 한글 한 글자를 1 로 본다.
+
+    한글만 넓다고 세면 한자와 가나가 로마자 취급을 받아, 그쪽 자막은 두 배로
+    길어진 뒤에야 나뉜다. 유니코드가 정해 둔 동아시아 폭을 그대로 쓴다.
+    """
+    return sum(
+        1 if east_asian_width(char) in ("W", "F") else 0.5 for char in text
+    ) // 1
 
 
 def split_for_one_line(line: str, limit: int = MAX_SUBTITLE_LINE_LENGTH) -> list[str]:

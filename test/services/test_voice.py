@@ -1312,6 +1312,17 @@ class TestSubtitleLineBreaks(unittest.TestCase):
         for chunk in chunks:
             self.assertLessEqual(_display_width(chunk), MAX_SUBTITLE_LINE_LENGTH)
 
+    def test_han_and_kana_take_the_full_room(self):
+        """
+        한글만 넓다고 세면 한자와 가나가 로마자 취급을 받아, 그쪽 자막은 두 배로
+        길어진 뒤에야 나뉜다.
+        """
+        from app.services.voice import _display_width
+
+        self.assertEqual(_display_width("東京"), _display_width("도쿄"))
+        self.assertEqual(_display_width("データ"), _display_width("데이터"))
+        self.assertGreater(_display_width("東京"), _display_width("ab"))
+
     def test_latin_letters_take_half_the_room(self):
         """
         로마자는 글자 폭이 한글의 절반쯤이다. 같은 글자 수로 재면 영어 자막이
@@ -1347,6 +1358,28 @@ class TestSubtitleFallsBackToWholeSentences(unittest.TestCase):
             )
         return SimpleNamespace(cues=cues, get_srt=lambda: "x")
 
+    def test_the_split_is_tried_first_and_the_whole_sentence_second(self):
+        """
+        나눈 것을 먼저 시도하고, 안 맞으면 원래 문장으로 돌아가야 한다. 순서가
+        뒤바뀌면 나누는 일이 아무 효과가 없고, 되돌아갈 곳이 없으면 자막이
+        통째로 빠진다.
+        """
+        from app.services.voice import _subtitle_line_candidates
+
+        sentences = ["그날 외장하드 하나 두고 작업 순서를 바꿨음", "이게 자리값 하더라"]
+        candidates = _subtitle_line_candidates(sentences)
+
+        self.assertEqual(len(candidates), 2)
+        self.assertGreater(len(candidates[0]), len(sentences))
+        self.assertEqual(candidates[1], sentences)
+
+    def test_nothing_to_split_means_nothing_to_fall_back_to(self):
+        """이미 다 짧으면 후보가 하나다. 같은 것을 두 번 시도할 이유가 없다."""
+        from app.services.voice import _subtitle_line_candidates
+
+        sentences = ["이게 자리값 하더라", "편집할 파일만 남겨둠"]
+        self.assertEqual(_subtitle_line_candidates(sentences), [sentences])
+
     def test_a_split_that_does_not_line_up_still_makes_subtitles(self):
         import tempfile
         from pathlib import Path
@@ -1365,6 +1398,8 @@ class TestSubtitleFallsBackToWholeSentences(unittest.TestCase):
             self.assertTrue(target.exists())
             written = target.read_text(encoding="utf-8")
 
+        # 나눈 것이 안 맞았으므로 원래 문장 그대로, 두 줄이어야 한다.
+        self.assertEqual(written.count("-->"), 2)
         self.assertIn("그날 외장하드 하나 두고 작업 순서를 바꿨음", written)
 
     def test_a_split_that_lines_up_is_used(self):
