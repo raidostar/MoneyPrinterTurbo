@@ -564,12 +564,26 @@ class TestSubjectKeywords(unittest.TestCase):
         self.assertEqual(llm.split_subject_keywords(""), [])
         self.assertEqual(llm.split_subject_keywords(None), [])
 
-    def test_too_many_keywords_are_dropped(self):
-        """열 개를 다 넣으라고 하면 나열만 하다 끝난다."""
-        listed = ",".join(f"낱말{i}" for i in range(20))
-        self.assertLessEqual(
-            len(llm.split_subject_keywords(listed)), llm.MAX_SUBJECT_KEYWORDS
-        )
+    def test_the_list_never_says_less_than_the_subject_holds(self):
+        """
+        목록을 잘라 내면 주제에는 있는데 목록에는 없는 낱말이 생긴다. 그러면
+        "전부 쓰라" 가 어느 쪽을 가리키는지 모르게 되어, 막으려던 누락이 그대로
+        난다. 개수는 주제 자체의 상한이 묶는다.
+        """
+        words = [f"낱말{i}" for i in range(20)]
+        prompt = llm.build_script_prompt(video_subject=",".join(words))
+
+        listed = prompt.split("<keywords>", 1)[1].split("</keywords>", 1)[0]
+        for word in words:
+            self.assertIn(f"<keyword>{word}</keyword>", listed)
+
+    def test_the_prompt_does_not_claim_a_count(self):
+        """
+        숫자를 적으면 주제와 목록이 어긋났을 때 모델이 둘 중 하나를 버린다.
+        """
+        prompt = llm.build_script_prompt(video_subject="여름,물놀이,아기썬크림")
+        self.assertNotIn("names 3 things", prompt)
+        self.assertIn("the things the subject names", prompt)
 
     def test_every_keyword_is_named_in_the_prompt(self):
         prompt = llm.build_script_prompt(video_subject="여름,물놀이,아기썬크림")
@@ -587,11 +601,15 @@ class TestSubjectKeywords(unittest.TestCase):
 
     def test_no_guess_is_made_about_which_keyword_is_the_product(self):
         """
-        "마지막이 제품" 은 `서울/부산 여행` 이나 `여름, 물놀이` 에서 틀린다.
-        설명형 대본에는 팔 물건이 아예 없다.
+        "마지막이 제품" 은 `서울/부산/여행` 에서 틀린다. 설명형 대본에는 팔 물건이
+        아예 없다. 지시는 있되 그 짐작은 없어야 한다.
         """
-        prompt = llm.build_script_prompt(video_subject="서울/부산/여행")
-        self.assertNotIn("usually the product", prompt)
+        instruction = llm.build_script_prompt(video_subject="서울/부산/여행").split(
+            "<keywords>", 1
+        )[1]
+
+        self.assertIn("every one of them has to be in the script", instruction)
+        self.assertNotIn("product", instruction)
 
     def test_the_keywords_are_marked_as_data(self):
         """

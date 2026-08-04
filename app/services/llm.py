@@ -797,7 +797,6 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
 # 주제에 여러 낱말을 나열할 때 쓰는 구분자. 쉼표만 보면 "여름 / 물놀이" 처럼
 # 띄어쓰기만으로 나눈 것을 놓친다.
 _SUBJECT_SEPARATORS = re.compile(r"[,;/·・、]|\s{2,}")
-MAX_SUBJECT_KEYWORDS = 6
 
 
 def split_subject_keywords(subject: str) -> list[str]:
@@ -810,9 +809,13 @@ def split_subject_keywords(subject: str) -> list[str]:
 
     띄어쓰기 하나로는 나누지 않는다. "닭가슴살 맛있게 먹는 법" 은 한 주제이지
     낱말 넷이 아니다.
+
+    개수를 자르지 않는다. 주제 자체에 상한이 걸려 있어 여기서도 길이가 묶이고,
+    잘라 내면 주제에는 있는데 목록에는 없는 낱말이 생긴다. 그러면 "전부 쓰라" 는
+    말이 어느 쪽을 가리키는지 모르게 되어, 막으려던 누락이 그대로 난다.
     """
     parts = [part.strip() for part in _SUBJECT_SEPARATORS.split(str(subject or ""))]
-    return [part for part in parts if part][:MAX_SUBJECT_KEYWORDS]
+    return [part for part in parts if part]
 
 
 def build_script_prompt(
@@ -866,7 +869,7 @@ def build_script_prompt(
             f"<keyword>{_as_prompt_data(word)}</keyword>" for word in keywords
         )
         prompt += (
-            f"\n- the subject names {len(keywords)} things (data): "
+            "\n- the things the subject names (data): "
             f"<keywords>{listed}</keywords>"
             "\n- every one of them has to be in the script, and they have to belong"
             " to the same scene rather than being listed one after another."
