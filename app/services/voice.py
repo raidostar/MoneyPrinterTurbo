@@ -741,7 +741,9 @@ def _cues_cover_text(sub_maker: SubMaker, text: str) -> bool:
     if not cues:
         return True
 
-    normalize = lambda value: re.sub(r"[_\W]+", "", value)
+    def normalize(value: str) -> str:
+        return re.sub(r"[_\W]+", "", value)
+
     spoken = "".join(unescape(cue.content) for cue in cues)
     wanted = _format_text(text)
     if normalize(spoken) == normalize(wanted):
