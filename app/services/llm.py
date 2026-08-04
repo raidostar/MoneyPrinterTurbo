@@ -65,6 +65,12 @@ Generate a script for a video, depending on the subject of the video.
     decides where to pause from punctuation alone, so keep the run of modifiers
     before a noun short. if a phrase could be grouped two ways when spoken,
     split it into two sentences or put a comma at the intended break.
+
+    Keep no stretch between two punctuation marks longer than about eighteen
+    Korean characters, or about forty Latin ones. Subtitles are cut at
+    punctuation, and a longer piece gets folded onto a second line with one
+    word stranded there. Put the comma at a phrase boundary — after a particle
+    or a connective ending, where you would breathe anyway.
 12. end on the payoff — the thing the hook promised. do not summarise what was
     just said, do not ask for likes or subscriptions, and do not trail off into
     a general lesson.
@@ -134,6 +140,13 @@ narrator's life; never invent the world.
 13. the narration is read by a text-to-speech voice that takes its pauses from
     punctuation alone. keep the run of words before a noun short, and put a comma
     where you want the breath.
+
+    There is a hard limit on how long a run can be. Subtitles are cut at
+    punctuation, and a piece too long to fit one line gets folded, leaving one
+    stranded word on a second line. So: no stretch between two punctuation marks
+    longer than about eighteen Korean characters, or about forty Latin ones.
+    Count them. If a clause runs past that, put a comma at the phrase boundary —
+    after a particle or a connective ending, where you would breathe anyway.
 14. keep the scale believable. a number the viewer would call exaggerated costs
     more than it buys.
 15. aim for 35 to 45 seconds read aloud, and count instead of estimating. in
@@ -224,8 +237,15 @@ never watched.
    part of the sentence. subtitles split on sentence punctuation, so a closing
    quote after a full stop is stranded on its own line.
 10. the narration is read by a text-to-speech voice that takes its pauses from
-    punctuation alone. keep the run of words before a noun short, and put a
-    comma where you want the breath.
+    punctuation alone. keep the run of words before a noun short, and put a comma
+    where you want the breath.
+
+    There is a hard limit on how long a run can be. Subtitles are cut at
+    punctuation, and a piece too long to fit one line gets folded, leaving one
+    stranded word on a second line. So: no stretch between two punctuation marks
+    longer than about eighteen Korean characters, or about forty Latin ones.
+    Count them. If a clause runs past that, put a comma at the phrase boundary —
+    after a particle or a connective ending, where you would breathe anyway.
 11. aim for 20 to 30 seconds read aloud, and count instead of estimating. in
     Korean that is roughly 200 to 300 characters; in English roughly 60 to 90
     words. shorter finishes; long loses them in the middle.
