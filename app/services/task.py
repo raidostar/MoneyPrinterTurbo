@@ -278,6 +278,11 @@ def generate_script(task_id, params):
     params.script_style = llm.resolve_script_style(params.script_style)
 
     video_script = params.video_script.strip()
+    if video_script:
+        # 직접 쓴 대본에는 말투를 붙이지 않는다. 요청값이 그대로 남으면, 쓰이지도
+        # 않은 말투가 기록에 남아 그 대본이 그렇게 쓰인 것처럼 보인다.
+        params.product_voice = ""
+
     if not video_script:
         # 매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 고르지
         # 않았으면 여기서 뽑고, 뽑은 것을 기록에 남긴다 — 남기지 않으면 마음에 든

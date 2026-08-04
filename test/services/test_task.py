@@ -1680,3 +1680,15 @@ class TestProductVoiceIsRecorded(unittest.TestCase):
 
         pick.assert_not_called()
         self.assertEqual(params.product_voice, "")
+
+    def test_a_voice_sent_with_a_hand_written_script_is_not_recorded(self):
+        """
+        직접 쓴 대본에는 말투가 붙지 않는다. 요청값이 그대로 남으면 그 대본이
+        그 말투로 쓰인 것처럼 보인다.
+        """
+        params = self._params(video_script="내가 쓴 대본", product_voice="diary")
+        with patch.object(tm.llm, "generate_script") as generate:
+            tm.generate_script("task-id", params)
+
+        generate.assert_not_called()
+        self.assertEqual(params.product_voice, "")

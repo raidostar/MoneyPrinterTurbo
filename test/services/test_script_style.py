@@ -371,7 +371,7 @@ class TestProductStyle(unittest.TestCase):
     def test_the_prompt_keeps_the_person_and_refuses_the_sales_voice(self):
         """매끈한 판매 멘트는 사람이 말하는 투보다 성과가 낮다."""
         prompt = self._prompt()
-        self.assertIn("~했음", prompt)
+        self.assertIn("Never a host, never a brand", prompt)
         for banned in ("대박", "인생템", "강추"):
             self.assertIn(banned, prompt)
 
@@ -454,6 +454,24 @@ class TestProductVoices(unittest.TestCase):
         self.assertIn(
             llm.PRODUCT_VOICES[llm.DEFAULT_PRODUCT_VOICE], self._prompt("없는말투")
         )
+
+    def test_the_common_rules_do_not_fight_the_chosen_voice(self):
+        """
+        공통 규칙이 한 말투를 못 박고 말투 쪽이 다른 것을 시키면, 모델은 둘 중
+        하나를 고른다. 대개 앞엣것이 이겨서 무엇을 뽑든 같은 대본이 나온다.
+        """
+        common = llm.script_style_prompt("product")
+        # 공통 부분에는 특정 어미를 못 박는 지시가 없어야 한다.
+        for ending in ("~했음", "~하더라", "~거임", "~던듯", "~해요", "~했다"):
+            self.assertNotIn(ending, common)
+        # 대신 말투 쪽을 따르라고 가리켜야 한다.
+        self.assertIn("the voice section", common)
+
+    def test_each_voice_names_its_own_endings(self):
+        """말투 쪽이 어미를 안 정하면 아무 데도 정한 곳이 없어진다."""
+        for name, body in llm.PRODUCT_VOICES.items():
+            with self.subTest(voice=name):
+                self.assertIn("~", body)
 
     def test_an_unknown_voice_is_not_written_into_the_log(self):
         """

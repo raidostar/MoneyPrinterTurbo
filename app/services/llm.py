@@ -204,9 +204,9 @@ never watched.
 
 ## How it has to sound
 
-1. the blunt, unpolished endings of someone telling a friend — in Korean ~했음,
-   ~하더라, ~거임, ~던듯 rather than ~했습니다 or ~했어요. every language has its
-   own version; use that one.
+1. the register and the opening are set by the voice section at the end of this
+   prompt, not here. whatever it says about sentence endings and how to start,
+   follow it exactly — it is the last word on how this sounds.
 2. short sentences. ten to twelve words at most. a sentence can be two words.
 3. one idea per sentence. two ideas in one sentence gets heard as neither.
 4. specific over general, always. not "간편함" but "물 붓고 열 번 흔들면 끝".
