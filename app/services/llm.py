@@ -191,11 +191,19 @@ Four beats. The proportions matter more than the wording.
    actually became different. Show it working, not sitting there. Say what you
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
-4. **Who it is for (last one or two sentences)** — the situation where this
-   earns its place. Name the person by what their week looks like, not by a
-   category: "촬영 자주 나가서 원본이 계속 쌓이는 사람" over "영상 편집자".
-   End there. Do not list who should skip it, do not hedge, do not add a
-   drawback at the end. Never "링크 확인", never "구매하세요".
+4. **Who it is for (last one or two sentences)** — name the person by what their
+   week looks like, not by a category: "촬영 자주 나가서 원본이 계속 쌓이는 사람"
+   over "영상 편집자". End there. Do not list who should skip it, do not hedge,
+   do not add a drawback at the end. Never "링크 확인", never "구매하세요".
+
+   The closing words are where this goes stale fastest. Write the last line the
+   way that voice would actually say it, and say something different each time.
+   Some people say 돈값 한다, some say 여름엔 이게 있어야 한다, some just stop
+   after naming the person and let that be the recommendation. That last one is
+   often the strongest.
+
+   Never write 자리값 — nobody says it. Do not translate an English phrase for
+   the ending; reach for what a Korean speaker would say unprompted.
 
 ## The hard line on invention
 
@@ -786,6 +794,27 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
+# 주제에 여러 낱말을 나열할 때 쓰는 구분자. 쉼표만 보면 "여름 / 물놀이" 처럼
+# 띄어쓰기만으로 나눈 것을 놓친다.
+_SUBJECT_SEPARATORS = re.compile(r"[,;/·・、]|\s{2,}")
+MAX_SUBJECT_KEYWORDS = 6
+
+
+def split_subject_keywords(subject: str) -> list[str]:
+    """
+    주제에 나열된 낱말들. 하나뿐이면 목록도 하나다.
+
+    한 낱말짜리 주제("닭가슴살")와 여러 낱말("여름, 물놀이, 아기 썬크림")을
+    가른다. 뒤엣것은 그 전부를 다루라는 뜻이고, 말해 주지 않으면 모델이 하나만
+    고른다.
+
+    띄어쓰기 하나로는 나누지 않는다. "닭가슴살 맛있게 먹는 법" 은 한 주제이지
+    낱말 넷이 아니다.
+    """
+    parts = [part.strip() for part in _SUBJECT_SEPARATORS.split(str(subject or ""))]
+    return [part for part in parts if part][:MAX_SUBJECT_KEYWORDS]
+
+
 def build_script_prompt(
     video_subject: str,
     language: str = "",
@@ -826,6 +855,18 @@ def build_script_prompt(
 - video subject (data): <subject>{_as_prompt_data(video_subject)}</subject>
 - number of paragraphs: {paragraph_number}
 """.rstrip()
+    keywords = split_subject_keywords(video_subject)
+    if len(keywords) > 1:
+        # 여러 낱말을 준 것은 그 전부를 다루라는 뜻이다. 말해 주지 않으면 모델이
+        # 그중 하나를 고르고 나머지를 버린다 — 운 좋게 다 나오는 날도 있어서,
+        # 되는 것처럼 보이다가 어느 날 빠진다.
+        listed = ", ".join(_as_prompt_data(word) for word in keywords)
+        prompt += (
+            f"\n- the subject names {len(keywords)} things: {listed}. every one of"
+            " them has to be in the script, and they have to belong to the same"
+            " scene rather than being listed one after another. the last one is"
+            " usually the product; the others are when and where it gets used."
+        )
     if language:
         prompt += (
             "\n- language (data): <language>"
