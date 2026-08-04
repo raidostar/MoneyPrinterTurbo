@@ -191,11 +191,23 @@ Four beats. The proportions matter more than the wording.
    actually became different. Show it working, not sitting there. Say what you
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
-4. **Who it is for (last one or two sentences)** — the situation where this
-   earns its place. Name the person by what their week looks like, not by a
-   category: "촬영 자주 나가서 원본이 계속 쌓이는 사람" over "영상 편집자".
-   End there. Do not list who should skip it, do not hedge, do not add a
-   drawback at the end. Never "링크 확인", never "구매하세요".
+4. **Who it is for (last one or two sentences)** — name the person by what their
+   week looks like, not by a category: "촬영 자주 나가서 원본이 계속 쌓이는 사람"
+   over "영상 편집자". End there. Do not list who should skip it, do not hedge,
+   do not add a drawback at the end. Never "링크 확인", never "구매하세요".
+
+   The closing words are where this goes stale fastest. Write the last line the
+   way that voice would actually say it, and say something different each time.
+   Sometimes that means saying what it was worth; sometimes it is enough to name
+   the person and stop, and letting that be the whole recommendation is often
+   the strongest ending of all.
+
+   Whatever language you are writing in, the last line has to be something a
+   native speaker of that language would say unprompted. Do not translate a
+   phrase from another language for the ending — a literal rendering reads as
+   translated even when every word is correct. Writing in Korean: never write
+   자리값, which nobody says; 돈값 한다 or 여름엔 이게 있어야 한다 are the kind
+   of thing people actually say.
 
 ## The hard line on invention
 
@@ -786,6 +798,48 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
+# 나열에 쓰는 구분자. 쉼표만 본다. 슬래시는 주소에("example.com/product"),
+# 쌍반점은 문장에("Compare cats; recommend dogs"), 두 칸 띄어쓰기는 그냥 오타에
+# 나타난다. 그것까지 구분자로 보면 멀쩡한 주제가 조각난다.
+_SUBJECT_SEPARATORS = re.compile(r"[,、，]")
+
+
+# 낱말 하나가 이보다 길거나 낱말 수가 이보다 많으면, 그건 항목이 아니라 문장이다.
+MAX_KEYWORD_LENGTH = 20
+MAX_KEYWORD_WORDS = 3
+
+
+def _looks_like_a_keyword(part: str) -> bool:
+    """항목 하나로 볼 만한 크기인지. 문장이면 ``False``."""
+    return len(part) <= MAX_KEYWORD_LENGTH and len(part.split()) <= MAX_KEYWORD_WORDS
+
+
+def split_subject_keywords(subject: str) -> list[str]:
+    """
+    주제에 나열된 낱말들. 하나뿐이면 목록도 하나다.
+
+    한 낱말짜리 주제("닭가슴살")와 여러 낱말("여름, 물놀이, 아기 썬크림")을
+    가른다. 뒤엣것은 그 전부를 다루라는 뜻이고, 말해 주지 않으면 모델이 하나만
+    고른다.
+
+    쉼표로만 나눈다. 슬래시와 쌍반점은 주소와 문장에도 나타나므로, 그것까지
+    구분자로 보면 "Review https://example.com/product" 가 세 조각이 된다.
+
+    개수를 자르지 않는다. 주제 자체에 상한이 걸려 있어 여기서도 길이가 묶이고,
+    잘라 내면 주제에는 있는데 목록에는 없는 낱말이 생긴다. 그러면 "전부 쓰라" 는
+    말이 어느 쪽을 가리키는지 모르게 되어, 막으려던 누락이 그대로 난다.
+
+    쉼표가 있다고 다 목록은 아니다. "Explain why inflation fell, but rents stayed
+    high" 는 문장 하나다. 조각이 전부 낱말 크기일 때만 목록으로 본다.
+    """
+    parts = [part.strip() for part in _SUBJECT_SEPARATORS.split(str(subject or ""))]
+    parts = [part for part in parts if part]
+    if len(parts) < 2 or not all(_looks_like_a_keyword(part) for part in parts):
+        subject = str(subject or "").strip()
+        return [subject] if subject else []
+    return parts
+
+
 def build_script_prompt(
     video_subject: str,
     language: str = "",
@@ -826,6 +880,22 @@ def build_script_prompt(
 - video subject (data): <subject>{_as_prompt_data(video_subject)}</subject>
 - number of paragraphs: {paragraph_number}
 """.rstrip()
+    keywords = split_subject_keywords(video_subject)
+    if len(keywords) > 1:
+        # 여러 낱말을 준 것은 그 전부를 다루라는 뜻이다. 말해 주지 않으면 모델이
+        # 그중 하나를 고르고 나머지를 버린다 — 운 좋게 다 나오는 날도 있어서,
+        # 되는 것처럼 보이다가 어느 날 빠진다.
+        # 낱말도 사용자가 쓴 글이다. 주제와 같은 방식으로 경계를 표시하고 꺾쇠를
+        # 이스케이프해, 재료 쪽에서 구분자를 만들 수 없게 한다.
+        listed = "".join(
+            f"<keyword>{_as_prompt_data(word)}</keyword>" for word in keywords
+        )
+        prompt += (
+            "\n- the things the subject names (data): "
+            f"<keywords>{listed}</keywords>"
+            "\n- every one of them has to be in the script, and they have to belong"
+            " to the same scene rather than being listed one after another."
+        )
     if language:
         prompt += (
             "\n- language (data): <language>"
