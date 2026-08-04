@@ -198,12 +198,16 @@ Four beats. The proportions matter more than the wording.
 
    The closing words are where this goes stale fastest. Write the last line the
    way that voice would actually say it, and say something different each time.
-   Some people say 돈값 한다, some say 여름엔 이게 있어야 한다, some just stop
-   after naming the person and let that be the recommendation. That last one is
-   often the strongest.
+   Sometimes that means saying what it was worth; sometimes it is enough to name
+   the person and stop, and letting that be the whole recommendation is often
+   the strongest ending of all.
 
-   Never write 자리값 — nobody says it. Do not translate an English phrase for
-   the ending; reach for what a Korean speaker would say unprompted.
+   Whatever language you are writing in, the last line has to be something a
+   native speaker of that language would say unprompted. Do not translate a
+   phrase from another language for the ending — a literal rendering reads as
+   translated even when every word is correct. Writing in Korean: never write
+   자리값, which nobody says; 돈값 한다 or 여름엔 이게 있어야 한다 are the kind
+   of thing people actually say.
 
 ## The hard line on invention
 

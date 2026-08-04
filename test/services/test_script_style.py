@@ -631,16 +631,29 @@ class TestClosingLine(unittest.TestCase):
     """
 
     def test_the_stale_phrase_is_banned(self):
-        self.assertIn("Never write 자리값", llm.script_style_prompt("product"))
+        self.assertIn("never write\n   자리값", llm.script_style_prompt("product"))
 
     def test_the_ending_is_asked_to_vary(self):
         prompt = llm.script_style_prompt("product")
         self.assertIn("say something different each time", prompt)
 
-    def test_the_ending_is_not_translated_from_english(self):
+    def test_the_ending_is_not_translated_from_another_language(self):
         """
         "earns its place" 를 옮기다 자리값이 나왔다. 옮기지 말라고 해야 한다.
         """
         prompt = llm.script_style_prompt("product")
-        self.assertIn("Do not translate an English phrase for", prompt)
+        self.assertIn("Do not translate a\n   phrase from another language", prompt)
         self.assertNotIn("earns its place", prompt)
+
+    def test_the_ending_rule_is_not_only_about_korean(self):
+        """
+        이 프롬프트는 어느 언어로든 쓴다. 한국어 사람처럼 쓰라고만 하면, 영어
+        대본에 한국어 표현이 섞이거나 언어가 흔들린다.
+        """
+        prompt = llm.script_style_prompt("product")
+
+        self.assertIn("Whatever language you are writing in", prompt)
+        # 한국어 예시는 한국어일 때만 쓰라고 표시되어 있어야 한다.
+        korean_note = prompt.split("Writing in Korean:", 1)
+        self.assertEqual(len(korean_note), 2)
+        self.assertIn("자리값", korean_note[1])
