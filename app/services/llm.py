@@ -860,12 +860,16 @@ def build_script_prompt(
         # 여러 낱말을 준 것은 그 전부를 다루라는 뜻이다. 말해 주지 않으면 모델이
         # 그중 하나를 고르고 나머지를 버린다 — 운 좋게 다 나오는 날도 있어서,
         # 되는 것처럼 보이다가 어느 날 빠진다.
-        listed = ", ".join(_as_prompt_data(word) for word in keywords)
+        # 낱말도 사용자가 쓴 글이다. 주제와 같은 방식으로 경계를 표시하고 꺾쇠를
+        # 이스케이프해, 재료 쪽에서 구분자를 만들 수 없게 한다.
+        listed = "".join(
+            f"<keyword>{_as_prompt_data(word)}</keyword>" for word in keywords
+        )
         prompt += (
-            f"\n- the subject names {len(keywords)} things: {listed}. every one of"
-            " them has to be in the script, and they have to belong to the same"
-            " scene rather than being listed one after another. the last one is"
-            " usually the product; the others are when and where it gets used."
+            f"\n- the subject names {len(keywords)} things (data): "
+            f"<keywords>{listed}</keywords>"
+            "\n- every one of them has to be in the script, and they have to belong"
+            " to the same scene rather than being listed one after another."
         )
     if language:
         prompt += (
