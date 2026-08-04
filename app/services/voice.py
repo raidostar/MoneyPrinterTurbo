@@ -1730,32 +1730,105 @@ def _build_subtitle_items_from_legacy_submaker(
     return sub_items
 
 
+# 세로 영상 자막 한 줄에 들어가는 글자 수. 이보다 길면 렌더러가 접고, 마지막 한
+# 단어만 다음 줄에 남아 어정쩡하게 보인다. 한글 기준으로 잡았고, 로마자는 글자
+# 폭이 절반쯤이라 두 배까지 본다.
+MAX_SUBTITLE_LINE_LENGTH = 18
+# 이보다 짧은 조각은 만들지 않는다. 두세 글자짜리 자막이 스쳐 지나가면 읽을 수
+# 없고, 나누기 전보다 나쁘다.
+MIN_SUBTITLE_LINE_LENGTH = 6
+# 말이 끊기는 자리. 조사와 연결어미 뒤는 소리 내어 읽어도 숨을 쉬는 지점이라,
+# 여기서 나누면 화면과 말이 같이 끊긴다.
+BREAK_ENDINGS = (
+    "은", "는", "이", "가", "을", "를", "에", "의", "도", "만",
+    "부터", "까지", "에서", "으로", "로", "와", "과", "랑", "한테", "에게",
+    "고", "서", "며", "면", "는데", "지만", "니까", "어서", "아서", "거나",
+)
+
+
+def _display_width(text: str) -> int:
+    """화면에서 차지하는 폭. 한글 한 글자를 1 로 본다."""
+    return sum(1 if "가" <= char <= "힣" else 0.5 for char in text) // 1
+
+
+def split_for_one_line(line: str, limit: int = MAX_SUBTITLE_LINE_LENGTH) -> list[str]:
+    """
+    한 줄에 들어가게 나눈다. 나눌 자리가 없으면 그대로 한 조각.
+
+    가운데에 가장 가까운 띄어쓰기에서 나눈다. 앞에서부터 채우면 뒤 조각이 한
+    단어만 남아, 렌더러가 접었을 때와 똑같이 보인다.
+    """
+    line = line.strip()
+    if _display_width(line) <= limit:
+        return [line]
+
+    # 띄어쓰기가 없으면 나눌 자리도 없다. 아래 반복이 그대로 끝나 원래 줄이 나온다.
+    spaces = [i for i, char in enumerate(line) if char == " "]
+    middle = len(line) / 2
+
+    def _cost(cut: int) -> float:
+        # 가운데에 가까울수록 좋다. 앞 낱말이 조사나 연결어미로 끝나면 거기가
+        # 말이 끊기는 자리라, 조금 치우쳐도 그쪽을 택한다.
+        head = line[:cut].rstrip()
+        bonus = len(line) * 0.15 if head.endswith(BREAK_ENDINGS) else 0
+        return abs(cut - middle) - bonus
+
+    for cut in sorted(spaces, key=_cost):
+        head, tail = line[:cut].strip(), line[cut + 1 :].strip()
+        if (
+            _display_width(head) >= MIN_SUBTITLE_LINE_LENGTH
+            and _display_width(tail) >= MIN_SUBTITLE_LINE_LENGTH
+        ):
+            # 나눈 조각도 길면 다시 나눈다.
+            return split_for_one_line(head, limit) + split_for_one_line(tail, limit)
+
+    return [line]
+
+
 def create_subtitle(sub_maker: SubMaker, text: str, subtitle_file: str):
     """
     자막 파일을 다듬는다.
     1. 자막 파일을 문장 부호 기준으로 여러 줄로 나눈다
-    2. 자막 파일의 텍스트를 줄 단위로 매칭한다
-    3. 새 자막 파일을 만든다
+    2. 한 줄에 안 들어가는 줄은 띄어쓰기에서 더 나눈다
+    3. 자막 파일의 텍스트를 줄 단위로 매칭한다
+    4. 새 자막 파일을 만든다
     """
     text = _format_text(text)
-    script_lines = utils.split_string_by_punctuations(text)
-    try:
+    sentences = utils.split_string_by_punctuations(text)
+
+    def _build(lines):
         if hasattr(sub_maker, "cues") and sub_maker.cues:
-            sub_items = _build_subtitle_items_from_edge_cues(sub_maker, script_lines)
-        else:
-            sub_items = _build_subtitle_items_from_legacy_submaker(
-                sub_maker, script_lines
-            )
+            return _build_subtitle_items_from_edge_cues(sub_maker, lines)
+        return _build_subtitle_items_from_legacy_submaker(sub_maker, lines)
 
-        if len(sub_items) != len(script_lines):
+    try:
+        # 긴 문장을 먼저 시도한다. 화면에 한 줄로 안 들어가면 렌더러가 접는데,
+        # 그때 마지막 한 단어만 다음 줄에 남아 어정쩡하게 보인다. 여기서 미리
+        # 나누면 조각마다 제 시간이 붙어, 말과 글자가 같이 넘어간다.
+        for script_lines in _subtitle_line_candidates(sentences):
+            sub_items = _build(script_lines)
+            if len(sub_items) == len(script_lines):
+                _write_subtitle_items(sub_items, subtitle_file)
+                return
             logger.warning(
-                f"failed, sub_items len: {len(sub_items)}, script_lines len: {len(script_lines)}"
+                f"failed, sub_items len: {len(sub_items)}, "
+                f"script_lines len: {len(script_lines)}"
             )
-            return
-
-        _write_subtitle_items(sub_items, subtitle_file)
     except Exception as e:
         logger.error(f"failed, error: {str(e)}")
+
+
+def _subtitle_line_candidates(sentences: list[str]) -> list[list[str]]:
+    """
+    자막 줄을 만들 후보들. 나눈 것을 먼저, 원래 문장을 나중에.
+
+    나눈 자리가 타임라인 조각 하나의 가운데를 지나면 매칭이 안 된다. 그때는
+    나누기 전으로 돌아가야 자막이 통째로 빠지는 것을 막을 수 있다.
+    """
+    split_lines = [chunk for line in sentences for chunk in split_for_one_line(line)]
+    if split_lines == sentences:
+        return [sentences]
+    return [split_lines, sentences]
 
 
 def _get_audio_duration_from_submaker(sub_maker: SubMaker):

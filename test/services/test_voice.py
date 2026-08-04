@@ -1216,3 +1216,174 @@ class TestTimelineCoversTheScript(unittest.TestCase):
             )
 
         self.assertIs(result, short)
+
+
+class TestSubtitleLineBreaks(unittest.TestCase):
+    """
+    한 줄에 안 들어가는 자막은 렌더러가 접고, 마지막 한 단어만 다음 줄에 남아
+    어정쩡하게 보인다. "그날 외장하드 하나 두고 작업 순서를 / 바꿨음" 처럼.
+    """
+
+    def test_a_line_that_fits_is_left_alone(self):
+        from app.services.voice import split_for_one_line
+
+        for line in ("이게 자리값 하더라", "편집 끝내고 내보내기 눌렀는데"):
+            with self.subTest(line=line):
+                self.assertEqual(split_for_one_line(line), [line])
+
+    def test_a_long_line_is_split(self):
+        from app.services.voice import MAX_SUBTITLE_LINE_LENGTH, _display_width, split_for_one_line
+
+        chunks = split_for_one_line("그날 외장하드 하나 두고 작업 순서를 바꿨음")
+
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(_display_width(chunk), MAX_SUBTITLE_LINE_LENGTH)
+
+    def test_the_split_does_not_strand_one_word(self):
+        """
+        앞에서부터 채우면 뒤 조각에 한 단어만 남아, 접혔을 때와 똑같이 보인다.
+        """
+        from app.services.voice import _display_width, split_for_one_line
+
+        for line in (
+            "그날 외장하드 하나 두고 작업 순서를 바꿨음",
+            "집 오면 촬영 원본부터 날짜별 폴더로 옮김",
+            "촬영 자주 나가서 원본이 매주 쌓이는 사람",
+        ):
+            with self.subTest(line=line):
+                head, tail = split_for_one_line(line)
+                self.assertGreaterEqual(_display_width(tail), 6)
+                # 한쪽이 다른 쪽의 세 배를 넘으면 나눈 의미가 없다.
+                self.assertLess(max(_display_width(head), _display_width(tail)),
+                                min(_display_width(head), _display_width(tail)) * 3)
+
+    def test_nothing_is_lost_or_added(self):
+        """자막은 소리와 맞춰야 한다. 글자가 바뀌면 그 자리에서 매칭이 깨진다."""
+        from app.services.voice import split_for_one_line
+
+        line = "급하게 파일 지우다가 전날 촬영본까지 같이 지웠음"
+        self.assertEqual(" ".join(split_for_one_line(line)), line)
+
+    def test_a_break_lands_where_speech_would_pause(self):
+        """
+        조사나 연결어미 뒤는 소리 내어 읽어도 숨을 쉬는 자리다. 그냥 가운데서
+        자르면 "내보내기 전에 뭘 / 지울지" 처럼 말이 끊기지 않는 곳에서 끊긴다.
+        """
+        from app.services.voice import split_for_one_line
+
+        head, _ = split_for_one_line("내보내기 전에 뭘 지울지 안 헤매게 됐음")
+        self.assertEqual(head, "내보내기 전에")
+
+    def test_a_word_too_long_to_split_is_kept_whole(self):
+        """나눌 자리가 없으면 그대로 둔다. 낱말 가운데를 자를 수는 없다."""
+        from app.services.voice import split_for_one_line
+
+        line = "한단어인데아주긴경우는나눌자리가없음"
+        self.assertEqual(split_for_one_line(line), [line])
+
+    def test_short_pieces_are_not_made(self):
+        """
+        두세 글자짜리 자막이 스쳐 지나가면 읽을 수 없다. 가운데에 가까운 자리가
+        그런 조각을 만들면, 조금 치우쳐도 다른 자리를 골라야 한다.
+        """
+        from app.services.voice import MIN_SUBTITLE_LINE_LENGTH, _display_width, split_for_one_line
+
+        # 나눌 수 있는 자리가 맨 앞뿐이고, 거기서 자르면 두 글자만 남는다.
+        # 그럴 바에는 안 나누는 편이 낫다.
+        for line in ("가나 다라마바사아자차카타파하거너더러머버서어저", "머버서어저 가"):
+            with self.subTest(line=line):
+                for chunk in split_for_one_line(line):
+                    self.assertGreaterEqual(
+                        _display_width(chunk), MIN_SUBTITLE_LINE_LENGTH
+                    )
+
+    def test_a_line_far_over_the_limit_is_split_more_than_once(self):
+        """
+        한 번만 나누면 절반도 여전히 한 줄에 안 들어간다. 그러면 그 조각이 다시
+        접히고, 고치려던 모양 그대로 나온다.
+        """
+        from app.services.voice import MAX_SUBTITLE_LINE_LENGTH, _display_width, split_for_one_line
+
+        line = "촬영 끝나고 집에 오면 원본부터 날짜별 폴더로 옮기고 편집할 것만 노트북에 남겨둠"
+        chunks = split_for_one_line(line)
+
+        self.assertGreater(len(chunks), 2)
+        for chunk in chunks:
+            self.assertLessEqual(_display_width(chunk), MAX_SUBTITLE_LINE_LENGTH)
+
+    def test_latin_letters_take_half_the_room(self):
+        """
+        로마자는 글자 폭이 한글의 절반쯤이다. 같은 글자 수로 재면 영어 자막이
+        멀쩡한데도 자꾸 나뉜다.
+        """
+        from app.services.voice import split_for_one_line
+
+        # 한글 열여덟 자보다 글자 수는 많지만 화면에서는 더 좁다.
+        self.assertEqual(
+            split_for_one_line("moving the raw files first"),
+            ["moving the raw files first"],
+        )
+
+
+class TestSubtitleFallsBackToWholeSentences(unittest.TestCase):
+    """
+    나눈 자리가 타임라인 조각 하나의 가운데를 지나면 매칭이 안 된다. 그때 그냥
+    실패하면 자막이 통째로 빠진다 — 나누기 전에는 나오던 자막이다.
+    """
+
+    def _sub_maker(self, chunks):
+        from datetime import timedelta
+        from types import SimpleNamespace
+
+        cues = []
+        for index, text in enumerate(chunks):
+            cues.append(
+                SimpleNamespace(
+                    content=text,
+                    start=timedelta(seconds=index),
+                    end=timedelta(seconds=index + 1),
+                )
+            )
+        return SimpleNamespace(cues=cues, get_srt=lambda: "x")
+
+    def test_a_split_that_does_not_line_up_still_makes_subtitles(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.services import voice as voice_module
+
+        # 타임라인이 문장 통째로 하나씩 온다. 나눈 조각과는 경계가 안 맞는다.
+        text = "그날 외장하드 하나 두고 작업 순서를 바꿨음. 이게 자리값 하더라."
+        maker = self._sub_maker(
+            ["그날 외장하드 하나 두고 작업 순서를 바꿨음", "이게 자리값 하더라"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "subtitle.srt"
+            voice_module.create_subtitle(maker, text, str(target))
+
+            self.assertTrue(target.exists())
+            written = target.read_text(encoding="utf-8")
+
+        self.assertIn("그날 외장하드 하나 두고 작업 순서를 바꿨음", written)
+
+    def test_a_split_that_lines_up_is_used(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.services import voice as voice_module
+
+        text = "그날 외장하드 하나 두고 작업 순서를 바꿨음."
+        maker = self._sub_maker(
+            ["그날", "외장하드", "하나", "두고", "작업", "순서를", "바꿨음"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "subtitle.srt"
+            voice_module.create_subtitle(maker, text, str(target))
+            written = target.read_text(encoding="utf-8")
+
+        # 나뉘어 각자 제 시간을 갖는다. 통째로 한 줄이면 두 조각이 다 들어 있는
+        # 것처럼 보이므로, 자막이 몇 개인지로 확인한다.
+        self.assertEqual(written.count("-->"), 2)
+        self.assertIn("그날 외장하드 하나 두고\n", written)
+        self.assertIn("작업 순서를 바꿨음\n", written)

@@ -509,3 +509,27 @@ class TestProductVoices(unittest.TestCase):
             custom_system_prompt="Only write two sentences.",
         )
         self.assertNotIn(llm.PRODUCT_VOICES["diary"], prompt)
+
+
+class TestBreathBudget(unittest.TestCase):
+    """
+    자막은 문장 부호에서 끊긴다. 부호 사이가 길면 한 줄에 안 들어가 접히고,
+    합성 음성도 그 구간을 한 숨에 읽어 끊어읽기가 어색해진다.
+    """
+
+    def test_every_style_caps_the_run_between_marks(self):
+        for style in llm.SCRIPT_STYLE_PROMPTS:
+            with self.subTest(style=style):
+                prompt = llm.script_style_prompt(style)
+                # 상한이 있다는 말과 그 숫자가 함께 있어야 지시가 된다.
+                self.assertRegex(
+                    prompt,
+                    r"(hard limit|Keep no stretch)[\s\S]{0,400}eighteen\s+Korean",
+                )
+
+    def test_the_rule_says_where_to_put_the_comma(self):
+        """어디에 넣으라고 안 하면 아무 데나 넣어 오히려 어색해진다."""
+        for style in llm.SCRIPT_STYLE_PROMPTS:
+            with self.subTest(style=style):
+                prompt = llm.script_style_prompt(style)
+                self.assertIn("particle", prompt)
