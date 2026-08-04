@@ -798,9 +798,10 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
-# 주제에 여러 낱말을 나열할 때 쓰는 구분자. 쉼표만 보면 "여름 / 물놀이" 처럼
-# 띄어쓰기만으로 나눈 것을 놓친다.
-_SUBJECT_SEPARATORS = re.compile(r"[,;/·・、]|\s{2,}")
+# 나열에 쓰는 구분자. 쉼표만 본다. 슬래시는 주소에("example.com/product"),
+# 쌍반점은 문장에("Compare cats; recommend dogs"), 두 칸 띄어쓰기는 그냥 오타에
+# 나타난다. 그것까지 구분자로 보면 멀쩡한 주제가 조각난다.
+_SUBJECT_SEPARATORS = re.compile(r"[,、，]")
 
 
 # 낱말 하나가 이보다 길거나 낱말 수가 이보다 많으면, 그건 항목이 아니라 문장이다.
@@ -821,8 +822,8 @@ def split_subject_keywords(subject: str) -> list[str]:
     가른다. 뒤엣것은 그 전부를 다루라는 뜻이고, 말해 주지 않으면 모델이 하나만
     고른다.
 
-    띄어쓰기 하나로는 나누지 않는다. "닭가슴살 맛있게 먹는 법" 은 한 주제이지
-    낱말 넷이 아니다.
+    쉼표로만 나눈다. 슬래시와 쌍반점은 주소와 문장에도 나타나므로, 그것까지
+    구분자로 보면 "Review https://example.com/product" 가 세 조각이 된다.
 
     개수를 자르지 않는다. 주제 자체에 상한이 걸려 있어 여기서도 길이가 묶이고,
     잘라 내면 주제에는 있는데 목록에는 없는 낱말이 생긴다. 그러면 "전부 쓰라" 는

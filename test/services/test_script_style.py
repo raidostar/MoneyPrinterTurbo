@@ -546,7 +546,7 @@ class TestSubjectKeywords(unittest.TestCase):
         for subject, expected in (
             ("여름,물놀이,아기썬크림", ["여름", "물놀이", "아기썬크림"]),
             ("여름, 물놀이, 아기 썬크림", ["여름", "물놀이", "아기 썬크림"]),
-            ("여름/물놀이/썬크림", ["여름", "물놀이", "썬크림"]),
+            ("여름,물놀이,썬크림", ["여름", "물놀이", "썬크림"]),
         ):
             with self.subTest(subject=subject):
                 self.assertEqual(llm.split_subject_keywords(subject), expected)
@@ -561,7 +561,11 @@ class TestSubjectKeywords(unittest.TestCase):
             "Compare the options; recommend the safest one",
             "여름 휴가 계획 세우는 법, 그리고 짐 싸는 순서까지",
             # 띄어쓰기 없이 긴 조각도 항목이 아니다.
-            "아침에마시는저당미숫가루한잔만드는레시피, 텀블러",
+            "아침에마시는저당미숫가루한잔만드는레시피와순서, 텀블러",
+            # 주소의 슬래시, 문장의 쌍반점, 두 칸 띄어쓰기는 구분자가 아니다.
+            "Review https://example.com/product",
+            "Compare cats; recommend dogs",
+            "AI  tools for creators",
         ):
             with self.subTest(subject=subject):
                 self.assertEqual(llm.split_subject_keywords(subject), [subject])
@@ -622,7 +626,7 @@ class TestSubjectKeywords(unittest.TestCase):
         "마지막이 제품" 은 `서울/부산/여행` 에서 틀린다. 설명형 대본에는 팔 물건이
         아예 없다. 지시는 있되 그 짐작은 없어야 한다.
         """
-        instruction = llm.build_script_prompt(video_subject="서울/부산/여행").split(
+        instruction = llm.build_script_prompt(video_subject="서울,부산,여행").split(
             "<keywords>", 1
         )[1]
 
