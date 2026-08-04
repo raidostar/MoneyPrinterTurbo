@@ -1076,3 +1076,143 @@ class TestDefaultVoiceRate(unittest.TestCase):
 
         with patch.dict(bot.config.ui, {}, clear=True):
             self.assertEqual(bot._build_params("주제", "대본").voice_rate, DEFAULT_VOICE_RATE)
+
+
+class TestTimelineCoversTheScript(unittest.TestCase):
+    """
+    자막은 타임라인 조각을 쌓아 대본 문장과 맞아떨어질 때 한 줄로 확정한다. 스트림이
+    도중에 끊겨 뒷부분이 없으면 남은 문장이 하나도 안 맞아, 자막 파일이 통째로
+    빠지고 자막 없는 영상이 나간다. 실제로 같은 대본에서 조각이 다섯 개만 온 적이
+    있고, 그때 열일곱 문장 중 하나만 맞았다.
+    """
+
+    def _sub_maker(self, chunks):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            cues=[SimpleNamespace(content=text) for text in chunks],
+            get_srt=lambda: "1\n00:00:00,000 --> 00:00:01,000\nx\n",
+        )
+
+    def test_a_complete_timeline_passes(self):
+        from app.services.voice import _cues_cover_text
+
+        text = "양치 끝냈는데, 고춧가루 또 나왔음. 치실은 귀찮았음."
+        chunks = ["양치", "끝냈는데", "고춧가루", "또", "나왔음", "치실은", "귀찮았음"]
+        self.assertTrue(_cues_cover_text(self._sub_maker(chunks), text))
+
+    def test_a_timeline_that_stops_early_is_refused(self):
+        from app.services.voice import _cues_cover_text
+
+        text = "양치 끝냈는데, 고춧가루 또 나왔음. 치실은 귀찮았음."
+        self.assertFalse(
+            _cues_cover_text(self._sub_maker(["양치", "끝냈는데", "고춧가루"]), text)
+        )
+
+    def test_an_old_style_maker_without_cues_is_left_alone(self):
+        """
+        cue 가 없는 예전 구조는 타임라인을 다르게 쌓는다. 이 검사로 막으면 멀쩡히
+        돌던 제공자가 매번 재시도에 걸린다.
+        """
+        from types import SimpleNamespace
+
+        from app.services.voice import _cues_cover_text
+
+        self.assertTrue(_cues_cover_text(SimpleNamespace(cues=[]), "아무 말"))
+        self.assertTrue(_cues_cover_text(SimpleNamespace(), "아무 말"))
+
+    def test_arabic_letter_shapes_are_accepted_the_same_way(self):
+        """
+        문장 매칭은 마지막에 아랍어 글자 형태를 맞춰 본다. 여기만 더 엄격하면,
+        자막은 만들 수 있는 대본인데도 세 번을 다 다시 부른다.
+        """
+        from app.services.voice import _cues_cover_text
+
+        self.assertTrue(
+            _cues_cover_text(self._sub_maker(["اهلا", "بك"]), "أهلاً بك")
+        )
+
+    def test_a_short_timeline_is_retried(self):
+        from unittest.mock import patch
+
+        from app.services import voice as voice_module
+
+        text = "첫 문장임. 두 번째 문장임."
+        short = self._sub_maker(["첫"])
+        full = self._sub_maker(["첫", "문장임", "두", "번째", "문장임"])
+        makers = [short, full]
+
+        def fake_stream(communicate, handle, timeout_seconds=None):
+            pass
+
+        with (
+            patch.object(voice_module, "create_edge_tts_communicate"),
+            patch.object(voice_module, "stream_edge_tts_chunks", side_effect=fake_stream),
+            patch.object(voice_module.edge_tts, "SubMaker", side_effect=lambda: makers.pop(0)),
+            patch.object(voice_module, "ensure_file_path_exists"),
+            patch("builtins.open", unittest.mock.mock_open()),
+        ):
+            result = voice_module.azure_tts_v1(
+                text=text, voice_name="ko-KR-X", voice_rate=1.3, voice_file="/tmp/x.mp3"
+            )
+
+        self.assertIs(result, full)
+
+    def test_a_timeline_is_never_paired_with_another_attempt_audio(self):
+        """
+        시도마다 같은 파일을 지우고 새로 쓴다. 첫 시도의 타임라인을 들고 있다가
+        세 번째 시도가 예외로 끝나면, 파일에는 세 번째의 반쪽 소리가 남았는데
+        첫 번째의 타임라인을 돌려주게 된다. 그 둘은 짝이 아니다.
+        """
+        from unittest.mock import patch
+
+        from app.services import voice as voice_module
+
+        short = self._sub_maker(["첫"])
+        makers = [short, short, short]
+        attempts = {"n": 0}
+
+        def sometimes_explode(communicate, handle, timeout_seconds=None):
+            attempts["n"] += 1
+            if attempts["n"] > 1:
+                raise RuntimeError("stream died")
+
+        with (
+            patch.object(voice_module, "create_edge_tts_communicate"),
+            patch.object(voice_module, "stream_edge_tts_chunks", side_effect=sometimes_explode),
+            patch.object(voice_module.edge_tts, "SubMaker", side_effect=lambda: makers.pop(0)),
+            patch.object(voice_module, "ensure_file_path_exists"),
+            patch.object(voice_module.os.path, "exists", return_value=False),
+            patch("builtins.open", unittest.mock.mock_open()),
+        ):
+            result = voice_module.azure_tts_v1(
+                text="첫 문장임. 두 번째 문장임.",
+                voice_name="ko-KR-X",
+                voice_rate=1.3,
+                voice_file="/tmp/x.mp3",
+            )
+
+        self.assertIsNone(result)
+
+    def test_audio_still_comes_back_when_the_timeline_never_covers(self):
+        """자막이 빠지는 것보다 소리가 없는 편이 나쁘다."""
+        from unittest.mock import patch
+
+        from app.services import voice as voice_module
+
+        short = self._sub_maker(["첫"])
+        with (
+            patch.object(voice_module, "create_edge_tts_communicate"),
+            patch.object(voice_module, "stream_edge_tts_chunks"),
+            patch.object(voice_module.edge_tts, "SubMaker", return_value=short),
+            patch.object(voice_module, "ensure_file_path_exists"),
+            patch("builtins.open", unittest.mock.mock_open()),
+        ):
+            result = voice_module.azure_tts_v1(
+                text="첫 문장임. 두 번째 문장임.",
+                voice_name="ko-KR-X",
+                voice_rate=1.3,
+                voice_file="/tmp/x.mp3",
+            )
+
+        self.assertIs(result, short)

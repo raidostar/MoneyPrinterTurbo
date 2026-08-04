@@ -150,6 +150,9 @@ class VideoParams(BaseModel):
     # 대본 어조. 직접 쓴 custom_system_prompt 가 있으면 그쪽이 이긴다.
     # 등록된 이름만 의미가 있으므로 길이를 넉넉한 상한으로 묶어 둔다.
     script_style: str = Field(default="informative", max_length=32)
+    # 제품 대본의 말투. 비워 두면 만들 때 하나를 뽑아 여기에 기록한다. 매번 같은
+    # 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다.
+    product_voice: str = Field(default="", max_length=32)
 
 
 class SubtitleRequest(BaseModel):

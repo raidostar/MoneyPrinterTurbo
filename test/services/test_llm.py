@@ -2010,5 +2010,13 @@ class TestSentenceSpacing(unittest.TestCase):
                 self.assertNotIn("U. S.", result)
                 self.assertNotIn("A. I.", result)
 
+    def test_a_sentence_ending_in_one_syllable_is_separated(self):
+        """
+        "~함.", "~둠." 처럼 한 글자로 끝나는 문장이 한국어에서는 흔하다. 앞쪽
+        글자 수로 거르면 이런 문장이 전부 붙은 채로 남는다.
+        """
+        self.assertIn("둠. 촬영", self._script("노트북에 둠.촬영 자주 나감."))
+        self.assertIn("함. 그리고", self._script("일단 함.그리고 다시 봄."))
+
     def test_text_that_is_already_spaced_is_not_double_spaced(self):
         self.assertNotIn("있음.  그대로", self._script("이미 띄어져 있음. 그대로 둠."))

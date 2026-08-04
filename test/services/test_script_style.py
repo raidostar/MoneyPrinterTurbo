@@ -355,7 +355,7 @@ class TestProductStyle(unittest.TestCase):
     def test_the_prompt_puts_the_product_at_the_centre(self):
         """무엇을 쓰는 이야기인지가 빠지면 그냥 경험담이 된다."""
         prompt = self._prompt()
-        for beat in ("Hook", "problem", "What changed", "How to decide"):
+        for beat in ("Hook", "problem", "What changed", "Who it is for"):
             self.assertIn(beat, prompt)
 
     def test_the_prompt_refuses_to_invent_claims_about_the_product(self):
@@ -371,19 +371,33 @@ class TestProductStyle(unittest.TestCase):
     def test_the_prompt_keeps_the_person_and_refuses_the_sales_voice(self):
         """매끈한 판매 멘트는 사람이 말하는 투보다 성과가 낮다."""
         prompt = self._prompt()
-        self.assertIn("~했음", prompt)
+        self.assertIn("Never a host, never a brand", prompt)
         for banned in ("대박", "인생템", "강추"):
             self.assertIn(banned, prompt)
 
-    def test_the_prompt_asks_for_the_downside(self):
-        """단점 한 줄이 칭찬 세 줄보다 믿음을 산다."""
-        self.assertIn("admit the annoying part", self._prompt())
+    def test_the_prompt_does_not_end_on_a_drawback(self):
+        """
+        마지막 줄이 "이런 사람은 사지 마세요" 로 끝나면, 사려던 사람도 거기서
+        멈춘다. 판단은 앞에서 다 주고 끝은 쓸 자리로 닫는다.
+        """
+        prompt = self._prompt()
+        self.assertIn("Do not list who should skip it", prompt)
+        self.assertNotIn("admit the annoying part", prompt)
+
+    def test_the_prompt_asks_for_one_time_it_happened(self):
+        """
+        "용량 부족 알림을 봤음" 은 분류고, 언제 어디서 뭘 하다 그랬는지가 사람의
+        하루다. 앞엣것만 쓰면 남 이야기로 들린다.
+        """
+        prompt = self._prompt()
+        self.assertIn("one time it happened", prompt)
+        self.assertIn("The cost has to be in it", prompt)
 
     def test_the_prompt_does_not_ask_for_a_link(self):
         """지금 구매 링크가 없다. 없는 곳을 가리키면 그 자리가 통째로 버려진다."""
         prompt = self._prompt()
         self.assertIn("구매하세요", prompt)
-        self.assertIn("Never", prompt.split("How to decide")[1][:400])
+        self.assertIn("Never", prompt.split("Who it is for")[1][:500])
 
     def test_the_style_does_not_replace_the_story_style(self):
         """경험담도 계속 만들 수 있어야 한다."""
@@ -391,3 +405,107 @@ class TestProductStyle(unittest.TestCase):
         self.assertNotEqual(
             llm.script_style_prompt("story"), llm.script_style_prompt("product")
         )
+
+
+class TestProductVoices(unittest.TestCase):
+    """
+    같은 규칙으로 계속 쓰면 대본이 전부 한 사람 목소리가 된다. 몇 편만 이어 봐도
+    기계가 썼다는 것이 보이고, 그때부터는 내용이 좋아도 안 믿는다.
+    """
+
+    def _prompt(self, voice):
+        return llm.build_script_prompt(
+            video_subject="외장하드", script_style="product", product_voice=voice
+        )
+
+    def test_there_is_more_than_one_voice(self):
+        self.assertGreaterEqual(len(llm.PRODUCT_VOICES), 3)
+
+    def test_each_voice_asks_for_a_different_register(self):
+        """
+        말투가 이름만 다르고 시키는 것이 같으면, 뽑아 써도 결과가 그대로다.
+        """
+        bodies = set(llm.PRODUCT_VOICES.values())
+        self.assertEqual(len(bodies), len(llm.PRODUCT_VOICES))
+
+    def test_the_chosen_voice_reaches_the_prompt(self):
+        for name, body in llm.PRODUCT_VOICES.items():
+            with self.subTest(voice=name):
+                self.assertIn(body, self._prompt(name))
+
+    def test_another_voice_is_not_also_sent(self):
+        """두 개가 같이 들어가면 서로 어긋난 지시를 받는다."""
+        prompt = self._prompt("diary")
+        for name, body in llm.PRODUCT_VOICES.items():
+            if name != "diary":
+                self.assertNotIn(body, prompt)
+
+    def test_the_structure_survives_every_voice(self):
+        """말투만 바뀌고 전개는 그대로여야 한다."""
+        for name in llm.PRODUCT_VOICES:
+            with self.subTest(voice=name):
+                prompt = self._prompt(name)
+                for beat in ("Hook", "The problem", "What changed", "Who it is for"):
+                    self.assertIn(beat, prompt)
+
+    def test_an_unknown_voice_falls_back_instead_of_failing(self):
+        self.assertEqual(llm.resolve_product_voice("없는말투"), llm.DEFAULT_PRODUCT_VOICE)
+        self.assertEqual(llm.resolve_product_voice(""), llm.DEFAULT_PRODUCT_VOICE)
+        self.assertIn(
+            llm.PRODUCT_VOICES[llm.DEFAULT_PRODUCT_VOICE], self._prompt("없는말투")
+        )
+
+    def test_the_common_rules_do_not_fight_the_chosen_voice(self):
+        """
+        공통 규칙이 한 말투를 못 박고 말투 쪽이 다른 것을 시키면, 모델은 둘 중
+        하나를 고른다. 대개 앞엣것이 이겨서 무엇을 뽑든 같은 대본이 나온다.
+        """
+        common = llm.script_style_prompt("product")
+        # 공통 부분에는 특정 어미를 못 박는 지시가 없어야 한다.
+        for ending in ("~했음", "~하더라", "~거임", "~던듯", "~해요", "~했다"):
+            self.assertNotIn(ending, common)
+        # 대신 말투 쪽을 따르라고 가리켜야 한다.
+        self.assertIn("the voice section", common)
+
+    def test_each_voice_names_its_own_endings(self):
+        """말투 쪽이 어미를 안 정하면 아무 데도 정한 곳이 없어진다."""
+        for name, body in llm.PRODUCT_VOICES.items():
+            with self.subTest(voice=name):
+                self.assertIn("~", body)
+
+    def test_an_unknown_voice_is_not_written_into_the_log(self):
+        """
+        이 칸에 다른 것을 잘못 넣어 보낼 수 있다. 값 자체를 기록에 남기면 그게
+        그대로 로그 파일에 남는다.
+        """
+        secret = "sk-abcdef0123456789"
+        with patch.object(llm.logger, "warning") as warned:
+            llm.resolve_product_voice(secret)
+
+        said = " ".join(str(call.args[0]) for call in warned.call_args_list)
+        self.assertNotIn(secret, said)
+        self.assertIn(str(len(secret)), said)
+
+    def test_picking_spreads_across_the_voices(self):
+        """하나만 계속 뽑히면 여러 개를 둔 의미가 없다."""
+        picked = {llm.pick_product_voice() for _ in range(200)}
+        self.assertEqual(picked, set(llm.PRODUCT_VOICES))
+
+    def test_other_styles_do_not_get_a_voice(self):
+        """설명형 대본에 제품 말투가 붙으면 규칙이 서로 어긋난다."""
+        for style in ("informative", "story"):
+            with self.subTest(style=style):
+                prompt = llm.build_script_prompt(
+                    video_subject="주제", script_style=style, product_voice="diary"
+                )
+                self.assertNotIn(llm.PRODUCT_VOICES["diary"], prompt)
+
+    def test_a_hand_written_prompt_is_not_overridden(self):
+        """직접 쓴 프롬프트에 얹으면 그 사람이 정한 말투를 덮어쓴다."""
+        prompt = llm.build_script_prompt(
+            video_subject="주제",
+            script_style="product",
+            product_voice="diary",
+            custom_system_prompt="Only write two sentences.",
+        )
+        self.assertNotIn(llm.PRODUCT_VOICES["diary"], prompt)

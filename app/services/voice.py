@@ -726,12 +726,42 @@ def stream_edge_tts_chunks(
         loop.close()
 
 
+def _cues_cover_text(sub_maker: SubMaker, text: str) -> bool:
+    """
+    타임라인이 대본을 끝까지 덮는지 본다.
+
+    자막은 cue 를 쌓아 대본 문장과 맞아떨어질 때 한 줄로 확정한다. 스트림이 도중에
+    끊겨 뒷부분 cue 가 없으면 남은 문장이 하나도 안 맞아 자막 파일이 통째로 빠진다.
+    정상일 때는 부호를 뺀 글자가 대본과 정확히 같으므로 그것으로 확인한다.
+
+    cue 가 없는 예전 구조는 여기서 판단하지 않는다. 그 경로는 원래 타임라인을 다르게
+    쌓았고, 이 검사로 막으면 멀쩡히 돌던 제공자가 매번 재시도에 걸린다.
+    """
+    cues = getattr(sub_maker, "cues", None)
+    if not cues:
+        return True
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[_\W]+", "", value)
+
+    spoken = "".join(unescape(cue.content) for cue in cues)
+    wanted = _format_text(text)
+    if normalize(spoken) == normalize(wanted):
+        return True
+    # 문장 매칭이 마지막에 아랍어 글자 형태를 맞춰 보는 것과 같은 기준을 쓴다.
+    # 여기만 더 엄격하면, 자막은 만들 수 있는 대본인데도 세 번을 다 다시 부른다.
+    return normalize(_normalize_arabic(spoken)) == normalize(_normalize_arabic(wanted))
+
+
 def azure_tts_v1(
     text: str, voice_name: str, voice_rate: float, voice_file: str
 ) -> Union[SubMaker, None]:
     voice_name = parse_voice_name(voice_name)
     text = text.strip()
     rate_str = convert_rate_to_percent(voice_rate)
+    # 타임라인이 모자랐던 시도를 들고 있는다. 자막이 빠지는 것보다 소리가 없는
+    # 편이 나쁘다. 파일에 남아 있는 소리와 짝이 맞는 것만 들고 있어야 한다.
+    fallback_sub_maker = None
     for i in range(3):
         try:
             logger.info(f"start, voice name: {voice_name}, try: {i + 1}")
@@ -741,6 +771,9 @@ def azure_tts_v1(
             # 1. 새 버전은 `boundary` 와 `stream_sync()` 를 지원한다
             # 2. 예전 버전은 `boundary` 를 지원하지 않고 보통 비동기 `stream()` 만 노출한다
             ensure_file_path_exists(voice_file)
+            # 시도마다 같은 파일을 지우고 새로 쓴다. 지난 시도의 타임라인을 들고
+            # 있으면 이번 시도의 소리와 짝이 어긋나므로, 쓰기 직전에 놓는다.
+            fallback_sub_maker = None
             communicate = create_edge_tts_communicate(text, voice_name, rate_str)
             sub_maker = edge_tts.SubMaker()
             timeout_seconds = get_edge_tts_timeout_seconds()
@@ -764,6 +797,17 @@ def azure_tts_v1(
                 logger.warning("failed, sub_maker.get_srt() is empty")
                 continue
 
+            # 타임라인이 대본을 끝까지 덮는지 본다. 스트림이 도중에 끊기면 오디오는
+            # 멀쩡한데 타임라인만 앞부분에서 잘려 돌아오고, 그 값도 비어 있지는
+            # 않아 위 검사를 지나간다. 그러면 자막을 만들 때 문장 매칭이 전부
+            # 밀려 파일이 조용히 안 만들어지고, 자막 없는 영상이 나간다.
+            fallback_sub_maker = sub_maker
+            if not _cues_cover_text(sub_maker, text):
+                logger.warning(
+                    f"failed, the timeline does not cover the script, try: {i + 1}"
+                )
+                continue
+
             logger.info(f"completed, output file: {voice_file}")
             return sub_maker
         except Exception as e:
@@ -780,6 +824,13 @@ def azure_tts_v1(
                         "failed to remove empty tts file: "
                         f"{voice_file}, error: {str(remove_error)}"
                     )
+    if fallback_sub_maker is not None:
+        # 마지막 시도의 타임라인이 모자랐다. 자막은 못 만들지만 그 시도의 소리는
+        # 파일에 남아 있으므로 그대로 돌려준다 — 자막 없는 영상이 소리 없는
+        # 영상보다 낫다. 마지막 시도가 예외로 끝났으면 여기 값이 없고, 그때는
+        # 파일에 쓸 만한 소리가 없으므로 실패로 돌려준다.
+        logger.warning("the timeline never covered the script; subtitles may be missing")
+        return fallback_sub_maker
     return None
 
 
