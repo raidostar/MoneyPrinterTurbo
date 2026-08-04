@@ -455,6 +455,19 @@ class TestProductVoices(unittest.TestCase):
             llm.PRODUCT_VOICES[llm.DEFAULT_PRODUCT_VOICE], self._prompt("없는말투")
         )
 
+    def test_an_unknown_voice_is_not_written_into_the_log(self):
+        """
+        이 칸에 다른 것을 잘못 넣어 보낼 수 있다. 값 자체를 기록에 남기면 그게
+        그대로 로그 파일에 남는다.
+        """
+        secret = "sk-abcdef0123456789"
+        with patch.object(llm.logger, "warning") as warned:
+            llm.resolve_product_voice(secret)
+
+        said = " ".join(str(call.args[0]) for call in warned.call_args_list)
+        self.assertNotIn(secret, said)
+        self.assertIn(str(len(secret)), said)
+
     def test_picking_spreads_across_the_voices(self):
         """하나만 계속 뽑히면 여러 개를 둔 의미가 없다."""
         picked = {llm.pick_product_voice() for _ in range(200)}

@@ -286,7 +286,12 @@ def resolve_product_voice(name: str) -> str:
     if key in PRODUCT_VOICES:
         return key
     if key:
-        logger.warning(f"unknown product voice: {key[:40]}, using {DEFAULT_PRODUCT_VOICE}")
+        # 값 자체는 남기지 않는다. 이 칸에 다른 것을 잘못 넣어 보낼 수 있고,
+        # 대본 스타일 쪽도 같은 이유로 길이만 남긴다.
+        logger.warning(
+            f"unknown product voice ({len(key)} characters), "
+            f"using {DEFAULT_PRODUCT_VOICE}"
+        )
     return DEFAULT_PRODUCT_VOICE
 
 

@@ -1121,6 +1121,17 @@ class TestTimelineCoversTheScript(unittest.TestCase):
         self.assertTrue(_cues_cover_text(SimpleNamespace(cues=[]), "아무 말"))
         self.assertTrue(_cues_cover_text(SimpleNamespace(), "아무 말"))
 
+    def test_arabic_letter_shapes_are_accepted_the_same_way(self):
+        """
+        문장 매칭은 마지막에 아랍어 글자 형태를 맞춰 본다. 여기만 더 엄격하면,
+        자막은 만들 수 있는 대본인데도 세 번을 다 다시 부른다.
+        """
+        from app.services.voice import _cues_cover_text
+
+        self.assertTrue(
+            _cues_cover_text(self._sub_maker(["اهلا", "بك"]), "أهلاً بك")
+        )
+
     def test_a_short_timeline_is_retried(self):
         from unittest.mock import patch
 

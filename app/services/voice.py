@@ -742,8 +742,13 @@ def _cues_cover_text(sub_maker: SubMaker, text: str) -> bool:
         return True
 
     normalize = lambda value: re.sub(r"[_\W]+", "", value)
-    spoken = normalize("".join(unescape(cue.content) for cue in cues))
-    return spoken == normalize(_format_text(text))
+    spoken = "".join(unescape(cue.content) for cue in cues)
+    wanted = _format_text(text)
+    if normalize(spoken) == normalize(wanted):
+        return True
+    # 문장 매칭이 마지막에 아랍어 글자 형태를 맞춰 보는 것과 같은 기준을 쓴다.
+    # 여기만 더 엄격하면, 자막은 만들 수 있는 대본인데도 세 번을 다 다시 부른다.
+    return normalize(_normalize_arabic(spoken)) == normalize(_normalize_arabic(wanted))
 
 
 def azure_tts_v1(
