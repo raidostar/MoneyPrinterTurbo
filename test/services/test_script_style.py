@@ -551,6 +551,24 @@ class TestSubjectKeywords(unittest.TestCase):
             with self.subTest(subject=subject):
                 self.assertEqual(llm.split_subject_keywords(subject), expected)
 
+    def test_prose_with_punctuation_is_one_subject(self):
+        """
+        쉼표가 있다고 다 목록은 아니다. 문장을 조각내면 그 조각들을 "한 장면에
+        두라" 는 지시까지 붙어, 멀쩡한 주제가 망가진다.
+        """
+        for subject in (
+            "Explain why inflation fell, but rents stayed high",
+            "Compare the options; recommend the safest one",
+            "여름 휴가 계획 세우는 법, 그리고 짐 싸는 순서까지",
+            # 띄어쓰기 없이 긴 조각도 항목이 아니다.
+            "아침에마시는저당미숫가루한잔만드는레시피, 텀블러",
+        ):
+            with self.subTest(subject=subject):
+                self.assertEqual(llm.split_subject_keywords(subject), [subject])
+                self.assertNotIn(
+                    "<keywords>", llm.build_script_prompt(video_subject=subject)
+                )
+
     def test_a_sentence_is_one_subject(self):
         """
         "닭가슴살 맛있게 먹는 법" 은 한 주제이지 낱말 넷이 아니다. 띄어쓰기 하나로

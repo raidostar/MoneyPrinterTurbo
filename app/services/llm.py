@@ -803,6 +803,16 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
 _SUBJECT_SEPARATORS = re.compile(r"[,;/·・、]|\s{2,}")
 
 
+# 낱말 하나가 이보다 길거나 낱말 수가 이보다 많으면, 그건 항목이 아니라 문장이다.
+MAX_KEYWORD_LENGTH = 20
+MAX_KEYWORD_WORDS = 3
+
+
+def _looks_like_a_keyword(part: str) -> bool:
+    """항목 하나로 볼 만한 크기인지. 문장이면 ``False``."""
+    return len(part) <= MAX_KEYWORD_LENGTH and len(part.split()) <= MAX_KEYWORD_WORDS
+
+
 def split_subject_keywords(subject: str) -> list[str]:
     """
     주제에 나열된 낱말들. 하나뿐이면 목록도 하나다.
@@ -817,9 +827,16 @@ def split_subject_keywords(subject: str) -> list[str]:
     개수를 자르지 않는다. 주제 자체에 상한이 걸려 있어 여기서도 길이가 묶이고,
     잘라 내면 주제에는 있는데 목록에는 없는 낱말이 생긴다. 그러면 "전부 쓰라" 는
     말이 어느 쪽을 가리키는지 모르게 되어, 막으려던 누락이 그대로 난다.
+
+    쉼표가 있다고 다 목록은 아니다. "Explain why inflation fell, but rents stayed
+    high" 는 문장 하나다. 조각이 전부 낱말 크기일 때만 목록으로 본다.
     """
     parts = [part.strip() for part in _SUBJECT_SEPARATORS.split(str(subject or ""))]
-    return [part for part in parts if part]
+    parts = [part for part in parts if part]
+    if len(parts) < 2 or not all(_looks_like_a_keyword(part) for part in parts):
+        subject = str(subject or "").strip()
+        return [subject] if subject else []
+    return parts
 
 
 def build_script_prompt(
