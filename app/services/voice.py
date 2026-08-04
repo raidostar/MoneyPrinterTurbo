@@ -752,8 +752,8 @@ def azure_tts_v1(
     voice_name = parse_voice_name(voice_name)
     text = text.strip()
     rate_str = convert_rate_to_percent(voice_rate)
-    # 타임라인이 계속 모자랄 때를 대비해 마지막으로 받은 것을 들고 있는다. 자막이
-    # 빠지는 것보다 소리가 없는 편이 나쁘다.
+    # 타임라인이 모자랐던 시도를 들고 있는다. 자막이 빠지는 것보다 소리가 없는
+    # 편이 나쁘다. 파일에 남아 있는 소리와 짝이 맞는 것만 들고 있어야 한다.
     fallback_sub_maker = None
     for i in range(3):
         try:
@@ -764,6 +764,9 @@ def azure_tts_v1(
             # 1. 새 버전은 `boundary` 와 `stream_sync()` 를 지원한다
             # 2. 예전 버전은 `boundary` 를 지원하지 않고 보통 비동기 `stream()` 만 노출한다
             ensure_file_path_exists(voice_file)
+            # 시도마다 같은 파일을 지우고 새로 쓴다. 지난 시도의 타임라인을 들고
+            # 있으면 이번 시도의 소리와 짝이 어긋나므로, 쓰기 직전에 놓는다.
+            fallback_sub_maker = None
             communicate = create_edge_tts_communicate(text, voice_name, rate_str)
             sub_maker = edge_tts.SubMaker()
             timeout_seconds = get_edge_tts_timeout_seconds()
@@ -815,8 +818,10 @@ def azure_tts_v1(
                         f"{voice_file}, error: {str(remove_error)}"
                     )
     if fallback_sub_maker is not None:
-        # 세 번 다 타임라인이 모자랐다. 자막은 못 만들지만 소리는 났으므로 그대로
-        # 돌려준다 — 자막 없는 영상이 소리 없는 영상보다 낫다.
+        # 마지막 시도의 타임라인이 모자랐다. 자막은 못 만들지만 그 시도의 소리는
+        # 파일에 남아 있으므로 그대로 돌려준다 — 자막 없는 영상이 소리 없는
+        # 영상보다 낫다. 마지막 시도가 예외로 끝났으면 여기 값이 없고, 그때는
+        # 파일에 쓸 만한 소리가 없으므로 실패로 돌려준다.
         logger.warning("the timeline never covered the script; subtitles may be missing")
         return fallback_sub_maker
     return None

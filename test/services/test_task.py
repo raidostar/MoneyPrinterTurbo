@@ -1631,7 +1631,38 @@ class TestProductVoiceIsRecorded(unittest.TestCase):
         self.assertEqual(generate.call_args.kwargs["product_voice"], "friend")
 
     def test_other_styles_do_not_pick_one(self):
-        params = self._params(script_style="story")
+        # 스타일을 바꾸기 전에 골라 둔 말투가 남아 있을 수 있다. 그대로 기록되면
+        # 경험담 대본에 쓰이지도 않은 제품 말투가 붙어 있게 된다.
+        params = self._params(script_style="story", product_voice="diary")
+        with (
+            patch.object(tm.llm, "pick_product_voice") as pick,
+            patch.object(tm.llm, "generate_script", return_value="대본"),
+        ):
+            tm.generate_script("task-id", params)
+
+        pick.assert_not_called()
+        self.assertEqual(params.product_voice, "")
+
+    def test_an_unknown_voice_is_recorded_as_the_one_actually_used(self):
+        """
+        모르는 이름은 기본 말투로 대체된다. 요청값을 그대로 기록하면 쓰이지 않은
+        말투가 남아, 기록을 보고 되살렸을 때 다른 대본이 나온다.
+        """
+        params = self._params(product_voice="없는말투")
+        with patch.object(tm.llm, "generate_script", return_value="대본") as generate:
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(params.product_voice, tm.llm.DEFAULT_PRODUCT_VOICE)
+        self.assertEqual(
+            generate.call_args.kwargs["product_voice"], tm.llm.DEFAULT_PRODUCT_VOICE
+        )
+
+    def test_a_custom_prompt_records_no_voice(self):
+        """
+        직접 쓴 프롬프트가 있으면 말투는 붙지 않는다. 그래도 기록에 남기면 화면에
+        나온 대본과 상관없는 값이 남는다.
+        """
+        params = self._params(custom_system_prompt="Only write two sentences.")
         with (
             patch.object(tm.llm, "pick_product_voice") as pick,
             patch.object(tm.llm, "generate_script", return_value="대본"),

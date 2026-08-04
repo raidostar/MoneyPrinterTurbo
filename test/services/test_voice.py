@@ -1147,6 +1147,42 @@ class TestTimelineCoversTheScript(unittest.TestCase):
 
         self.assertIs(result, full)
 
+    def test_a_timeline_is_never_paired_with_another_attempt_audio(self):
+        """
+        시도마다 같은 파일을 지우고 새로 쓴다. 첫 시도의 타임라인을 들고 있다가
+        세 번째 시도가 예외로 끝나면, 파일에는 세 번째의 반쪽 소리가 남았는데
+        첫 번째의 타임라인을 돌려주게 된다. 그 둘은 짝이 아니다.
+        """
+        from unittest.mock import patch
+
+        from app.services import voice as voice_module
+
+        short = self._sub_maker(["첫"])
+        makers = [short, short, short]
+        attempts = {"n": 0}
+
+        def sometimes_explode(communicate, handle, timeout_seconds=None):
+            attempts["n"] += 1
+            if attempts["n"] > 1:
+                raise RuntimeError("stream died")
+
+        with (
+            patch.object(voice_module, "create_edge_tts_communicate"),
+            patch.object(voice_module, "stream_edge_tts_chunks", side_effect=sometimes_explode),
+            patch.object(voice_module.edge_tts, "SubMaker", side_effect=lambda: makers.pop(0)),
+            patch.object(voice_module, "ensure_file_path_exists"),
+            patch.object(voice_module.os.path, "exists", return_value=False),
+            patch("builtins.open", unittest.mock.mock_open()),
+        ):
+            result = voice_module.azure_tts_v1(
+                text="첫 문장임. 두 번째 문장임.",
+                voice_name="ko-KR-X",
+                voice_rate=1.3,
+                voice_file="/tmp/x.mp3",
+            )
+
+        self.assertIsNone(result)
+
     def test_audio_still_comes_back_when_the_timeline_never_covers(self):
         """자막이 빠지는 것보다 소리가 없는 편이 나쁘다."""
         from unittest.mock import patch
