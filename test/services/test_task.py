@@ -88,6 +88,7 @@ class TestTaskService(unittest.TestCase):
             video_script_prompt="가벼운 톤으로",
             custom_system_prompt="Only write short narration.",
             script_style="story",
+            product_voice="",
         )
 
     def test_generate_final_videos_forwards_clip_speed(self):
@@ -1592,3 +1593,59 @@ class TestTaskService(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProductVoiceIsRecorded(unittest.TestCase):
+    """
+    매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 뽑은 말투는
+    기록에 남아야, 마음에 든 대본이 어떤 말투였는지 되짚을 수 있다.
+    """
+
+    def _params(self, **overrides):
+        values = {"video_subject": "외장하드", "video_script": "", "script_style": "product"}
+        values.update(overrides)
+        return VideoParams(**values)
+
+    def test_a_voice_is_picked_and_kept(self):
+        params = self._params()
+        with (
+            patch.object(tm.llm, "pick_product_voice", return_value="diary") as pick,
+            patch.object(tm.llm, "generate_script", return_value="대본") as generate,
+        ):
+            tm.generate_script("task-id", params)
+
+        pick.assert_called_once()
+        self.assertEqual(params.product_voice, "diary")
+        self.assertEqual(generate.call_args.kwargs["product_voice"], "diary")
+
+    def test_a_voice_that_was_asked_for_is_left_alone(self):
+        """지난 작업을 되살렸을 때 다른 말투로 만들어지면 안 된다."""
+        params = self._params(product_voice="friend")
+        with (
+            patch.object(tm.llm, "pick_product_voice") as pick,
+            patch.object(tm.llm, "generate_script", return_value="대본") as generate,
+        ):
+            tm.generate_script("task-id", params)
+
+        pick.assert_not_called()
+        self.assertEqual(generate.call_args.kwargs["product_voice"], "friend")
+
+    def test_other_styles_do_not_pick_one(self):
+        params = self._params(script_style="story")
+        with (
+            patch.object(tm.llm, "pick_product_voice") as pick,
+            patch.object(tm.llm, "generate_script", return_value="대본"),
+        ):
+            tm.generate_script("task-id", params)
+
+        pick.assert_not_called()
+        self.assertEqual(params.product_voice, "")
+
+    def test_a_script_that_was_written_by_hand_picks_nothing(self):
+        """쓸 일이 없는 말투를 뽑아 기록에 남기면 기록이 사실과 달라진다."""
+        params = self._params(video_script="내가 쓴 대본")
+        with patch.object(tm.llm, "pick_product_voice") as pick:
+            tm.generate_script("task-id", params)
+
+        pick.assert_not_called()
+        self.assertEqual(params.product_voice, "")

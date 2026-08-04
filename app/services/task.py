@@ -279,6 +279,13 @@ def generate_script(task_id, params):
 
     video_script = params.video_script.strip()
     if not video_script:
+        # 매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 고르지
+        # 않았으면 여기서 뽑고, 뽑은 것을 기록에 남긴다 — 남기지 않으면 마음에 든
+        # 대본이 어떤 말투였는지 되짚을 수 없다.
+        if params.script_style == "product" and not params.product_voice:
+            params.product_voice = llm.pick_product_voice()
+            logger.info(f"product voice: {params.product_voice}")
+
         video_script = llm.generate_script(
             video_subject=params.video_subject,
             language=params.video_language,
@@ -286,6 +293,7 @@ def generate_script(task_id, params):
             video_script_prompt=params.video_script_prompt,
             custom_system_prompt=params.custom_system_prompt,
             script_style=params.script_style,
+            product_voice=params.product_voice,
         )
     else:
         logger.debug(f"video script: \n{video_script}")

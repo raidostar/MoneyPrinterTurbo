@@ -726,12 +726,35 @@ def stream_edge_tts_chunks(
         loop.close()
 
 
+def _cues_cover_text(sub_maker: SubMaker, text: str) -> bool:
+    """
+    타임라인이 대본을 끝까지 덮는지 본다.
+
+    자막은 cue 를 쌓아 대본 문장과 맞아떨어질 때 한 줄로 확정한다. 스트림이 도중에
+    끊겨 뒷부분 cue 가 없으면 남은 문장이 하나도 안 맞아 자막 파일이 통째로 빠진다.
+    정상일 때는 부호를 뺀 글자가 대본과 정확히 같으므로 그것으로 확인한다.
+
+    cue 가 없는 예전 구조는 여기서 판단하지 않는다. 그 경로는 원래 타임라인을 다르게
+    쌓았고, 이 검사로 막으면 멀쩡히 돌던 제공자가 매번 재시도에 걸린다.
+    """
+    cues = getattr(sub_maker, "cues", None)
+    if not cues:
+        return True
+
+    normalize = lambda value: re.sub(r"[_\W]+", "", value)
+    spoken = normalize("".join(unescape(cue.content) for cue in cues))
+    return spoken == normalize(_format_text(text))
+
+
 def azure_tts_v1(
     text: str, voice_name: str, voice_rate: float, voice_file: str
 ) -> Union[SubMaker, None]:
     voice_name = parse_voice_name(voice_name)
     text = text.strip()
     rate_str = convert_rate_to_percent(voice_rate)
+    # 타임라인이 계속 모자랄 때를 대비해 마지막으로 받은 것을 들고 있는다. 자막이
+    # 빠지는 것보다 소리가 없는 편이 나쁘다.
+    fallback_sub_maker = None
     for i in range(3):
         try:
             logger.info(f"start, voice name: {voice_name}, try: {i + 1}")
@@ -764,6 +787,17 @@ def azure_tts_v1(
                 logger.warning("failed, sub_maker.get_srt() is empty")
                 continue
 
+            # 타임라인이 대본을 끝까지 덮는지 본다. 스트림이 도중에 끊기면 오디오는
+            # 멀쩡한데 타임라인만 앞부분에서 잘려 돌아오고, 그 값도 비어 있지는
+            # 않아 위 검사를 지나간다. 그러면 자막을 만들 때 문장 매칭이 전부
+            # 밀려 파일이 조용히 안 만들어지고, 자막 없는 영상이 나간다.
+            fallback_sub_maker = sub_maker
+            if not _cues_cover_text(sub_maker, text):
+                logger.warning(
+                    f"failed, the timeline does not cover the script, try: {i + 1}"
+                )
+                continue
+
             logger.info(f"completed, output file: {voice_file}")
             return sub_maker
         except Exception as e:
@@ -780,6 +814,11 @@ def azure_tts_v1(
                         "failed to remove empty tts file: "
                         f"{voice_file}, error: {str(remove_error)}"
                     )
+    if fallback_sub_maker is not None:
+        # 세 번 다 타임라인이 모자랐다. 자막은 못 만들지만 소리는 났으므로 그대로
+        # 돌려준다 — 자막 없는 영상이 소리 없는 영상보다 낫다.
+        logger.warning("the timeline never covered the script; subtitles may be missing")
+        return fallback_sub_maker
     return None
 
 

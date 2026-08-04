@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import random
 import re
 from time import perf_counter
 from typing import List
@@ -165,17 +166,23 @@ Four beats. The proportions matter more than the wording.
    of them leave here, so this line carries the video. Open on the problem
    already happening, or on the result already achieved. Never on setup, never
    on the product's name.
-2. **The problem (next two or three sentences)** — the annoyance the viewer
-   already has. Make it specific enough that they recognise their own week in
-   it. If they do not have this problem, they should leave here, and that is
-   fine.
+2. **The problem (next two or three sentences)** — not the annoyance in general,
+   but one time it happened. A place, a moment, what you were doing, what went
+   wrong. "용량 부족 알림을 봤음" is a category; "편집 끝내고 내보내기 눌렀는데
+   용량 부족이라 십 분짜리 렌더링이 거기서 멈췄음" is a Tuesday the viewer has
+   had. Write the second kind.
+
+   The cost has to be in it. Time lost, work redone, something given up, the
+   thing you kept putting off. A problem with no cost reads as a preference.
 3. **What changed (the middle, the longest beat)** — the thing, and what
    actually became different. Show it working, not sitting there. Say what you
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
-4. **How to decide (last two sentences)** — who this is for and who should skip
-   it. Naming who should skip it is what makes the rest believable, and it is
-   the line viewers screenshot. Never "링크 확인", never "구매하세요".
+4. **Who it is for (last one or two sentences)** — the situation where this
+   earns its place. Name the person by what their week looks like, not by a
+   category: "촬영 자주 나가서 원본이 계속 쌓이는 사람" over "영상 편집자".
+   End there. Do not list who should skip it, do not hedge, do not add a
+   drawback at the end. Never "링크 확인", never "구매하세요".
 
 ## The hard line on invention
 
@@ -204,9 +211,7 @@ never watched.
 3. one idea per sentence. two ideas in one sentence gets heard as neither.
 4. specific over general, always. not "간편함" but "물 붓고 열 번 흔들면 끝".
    not "여러 가지" but the two you actually use.
-5. admit the annoying part. the thing that is worse about it, said plainly, buys
-   more trust than three sentences of praise. every real recommendation has one.
-6. no exclamation marks, no "대박", no "인생템", no "강추". those are the words of
+5. no exclamation marks, no "대박", no "인생템", no "강추". those are the words of
    an advertisement wearing a person's clothes.
 
 ## Mechanics
@@ -227,6 +232,67 @@ never watched.
 12. plain text only. no markdown, no titles, no speaker labels, no emoji.
 13. respond in the same language as the video subject.
 """.strip()
+
+
+# 같은 규칙으로 계속 쓰면 대본이 전부 한 사람 목소리가 된다. 몇 편만 이어 봐도
+# 기계가 썼다는 것이 보이고, 그때부터는 내용이 좋아도 안 믿는다. 구조는 그대로 두고
+# 말투와 여는 방식만 바꾼 판을 여러 개 두고 매번 하나를 뽑는다.
+PRODUCT_VOICES = {
+    "community": """
+## This one's voice: a post on a community board
+
+Blunt, unpolished, typed fast. Korean endings ~했음, ~하더라, ~거임, ~던듯.
+Open mid-annoyance, as if continuing a thought you already started.
+No greeting, no self-introduction. Sentence fragments are fine.
+""".strip(),
+    "friend": """
+## This one's voice: telling a friend over coffee
+
+Casual spoken register — Korean 반말: ~했어, ~하더라고, ~거든, ~야.
+Open by addressing them directly about something you know they deal with.
+You can interrupt yourself and double back the way people do out loud.
+""".strip(),
+    "diary": """
+## This one's voice: a short log kept over days
+
+Quiet, factual, past tense — Korean ~했다, ~였다, or plain ~해요 if it fits better.
+Open on a specific day or count: 사흘째, 첫날, 두 달쯤 됐을 때.
+Mark time as you go. What changed should read as something you noticed, not
+something you decided.
+""".strip(),
+    "confession": """
+## This one's voice: admitting you were wrong about it
+
+Slightly self-deprecating — Korean ~했는데, ~인 줄 알았음, ~였음.
+Open on the belief you held: you thought it was unnecessary, overpriced, a
+gimmick. Then what changed your mind, plainly.
+Do not turn the reversal into a punchline. State it and move on.
+""".strip(),
+    "answer": """
+## This one's voice: answering a question you get asked
+
+Direct, informative, spoken politely — Korean ~해요, ~였어요, ~더라고요.
+Open on the question itself, as something a real person asked you.
+Answer it in order, the way you would if they were standing there.
+No rhetorical questions after the first line.
+""".strip(),
+}
+DEFAULT_PRODUCT_VOICE = "community"
+
+
+def resolve_product_voice(name: str) -> str:
+    """쓸 수 있는 말투 이름으로 맞춘다. 모르는 이름이면 기본값."""
+    key = str(name or "").strip().lower()
+    if key in PRODUCT_VOICES:
+        return key
+    if key:
+        logger.warning(f"unknown product voice: {key[:40]}, using {DEFAULT_PRODUCT_VOICE}")
+    return DEFAULT_PRODUCT_VOICE
+
+
+def pick_product_voice() -> str:
+    """이번 대본에 쓸 말투를 하나 뽑는다."""
+    return random.choice(sorted(PRODUCT_VOICES))
 
 
 # 스타일 이름 → 기본 system prompt. 스키마와 WebUI 목록이 이 딕셔너리를 그대로 쓴다.
@@ -702,6 +768,7 @@ def build_script_prompt(
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
     script_style: str = "",
+    product_voice: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -721,6 +788,10 @@ def build_script_prompt(
     # 들어가야 하는 파라미터를 빠뜨리지 않는다.
     # 직접 써 넣은 프롬프트가 항상 이긴다. 스타일은 기본값을 고르는 수단일 뿐이다.
     prompt = custom_system_prompt or script_style_prompt(script_style)
+    # 말투는 제품 스타일에만 붙인다. 직접 쓴 프롬프트에 얹으면 그 사람이 정한
+    # 말투를 이쪽에서 덮어쓰게 된다.
+    if not custom_system_prompt and resolve_script_style(script_style) == "product":
+        prompt += "\n\n" + PRODUCT_VOICES[resolve_product_voice(product_voice)]
     # 주제, 언어, 추가 요구사항은 사용자가 쓴 글이라 규칙처럼 읽힐 수 있다. 헤드라인
     # 쪽과 같은 방식으로 경계를 표시하고 꺾쇠를 이스케이프해, 재료 쪽에서 구분자를
     # 만들 수 없게 한다.
@@ -754,6 +825,7 @@ def generate_script(
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
     script_style: str = "",
+    product_voice: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -769,6 +841,7 @@ def generate_script(
         video_script_prompt=video_script_prompt,
         custom_system_prompt=custom_system_prompt,
         script_style=script_style,
+        product_voice=product_voice,
     )
     final_script = ""
     logger.info(
@@ -792,11 +865,12 @@ def generate_script(
         # 처럼 이어지는데, 자막은 문장 부호에서 끊으므로 그 조각이 다음 줄 앞에
         # 붙어 나가고, 합성 음성도 한 덩어리로 읽는다.
         #
-        # 다음 글자가 문장이 시작되는 모양일 때만, 그리고 앞에 두 글자 넘는 말이
-        # 있을 때만 넣는다. 그냥 넣으면 소수점(1.5), 주소(www.example.com),
-        # 약어(U.S.A)가 같이 쪼개진다.
+        # 앞이 한글이거나 영어 낱말의 끝이고, 뒤가 문장이 시작되는 모양일 때만
+        # 넣는다. 그냥 넣으면 소수점(1.5), 주소(www.example.com), 약어(U.S.A)가
+        # 같이 쪼개진다. 한글 한 글자로 끝나는 문장("~함.")도 흔하므로 앞쪽
+        # 글자 수로 거르지 않는다.
         response = re.sub(
-            r"(?<=[^\d\s.]{2})([.?!])(?=[가-힣A-Z])", r"\1 ", response
+            r"(?:(?<=[가-힣])|(?<=[a-z]{2}))([.?!])(?=[가-힣A-Z])", r"\1 ", response
         )
 
         # Split the script into paragraphs
