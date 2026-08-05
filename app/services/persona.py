@@ -23,6 +23,9 @@ class Persona:
 
     key: str
     name: str
+    # 이 사람의 목소리. 30대 여자가 쓴 글을 남자 목소리로 읽으면, 말투를 아무리
+    # 맞춰도 그 자리에서 어긋난다.
+    voice: str
     # 어떤 사람이고 한 주가 어떻게 흘러가는지. 장면이 여기서 나온다.
     life: str
     # 문장을 어떻게 끝내는지. 채널 안에서는 이것이 바뀌지 않는다.
@@ -70,6 +73,7 @@ PERSONAS = {
     "haerinmom": Persona(
         key="haerinmom",
         name="해린맘",
+        voice="ko-KR-SunHiNeural-Female",
         life=(
             "You have a four-year-old daughter, 해린, who goes to 어린이집. You are"
             " in your mid-thirties and you work, so the morning is always a race —"
@@ -98,6 +102,7 @@ PERSONAS = {
     "kimbujang": Persona(
         key="kimbujang",
         name="김부장",
+        voice="ko-KR-InJoonNeural-Male",
         life=(
             "You are in your late forties, a team head at a large company, and you"
             " play golf. Weekend rounds, the driving range on the way home, the"
