@@ -28,6 +28,26 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(speaker.key, "haerinmom")
         self.assertEqual(speaker.name, "해린맘")
 
+    def test_every_person_has_a_voice_that_exists(self):
+        """
+        여기 적은 이름이 실제 목록에 없으면 그 사람의 영상만 소리 없이 실패한다.
+        오타는 눈으로 안 보인다.
+        """
+        from app.services import voice
+
+        available = set(voice.get_all_azure_voices(filter_locals=None))
+        for key, speaker in persona.PERSONAS.items():
+            with self.subTest(persona=key):
+                self.assertIn(speaker.voice, available)
+
+    def test_the_voice_matches_who_is_speaking(self):
+        """
+        30대 여자가 쓴 글을 남자 목소리로 읽으면 말투를 아무리 맞춰도 그 자리에서
+        어긋난다.
+        """
+        self.assertTrue(persona.PERSONAS["haerinmom"].voice.endswith("-Female"))
+        self.assertTrue(persona.PERSONAS["kimbujang"].voice.endswith("-Male"))
+
     def test_an_unknown_name_is_not_written_into_the_log(self):
         """이 칸에 다른 것을 잘못 넣어 보낼 수 있다."""
         secret = "sk-abcdef0123456789"

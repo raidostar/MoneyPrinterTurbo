@@ -184,11 +184,14 @@ def _build_params(subject: str, script: str, product_persona: str = "") -> Video
     쓰고, 봇은 주제와 대본만 받는다.
     """
     saved = config.ui
+    # 목소리는 사람을 따라간다. 화면에 저장된 목소리 하나를 그대로 쓰면 30대 여자가
+    # 쓴 글을 남자 목소리가 읽는다 — 말투를 아무리 맞춰도 그 자리에서 어긋난다.
+    speaker = persona.resolve(product_persona)
     return VideoParams(
         video_subject=subject,
         video_script=script,
         video_language=str(saved.get("video_language", "") or ""),
-        voice_name=str(saved.get("voice_name", "") or ""),
+        voice_name=speaker.voice if speaker else str(saved.get("voice_name", "") or ""),
         voice_rate=float(saved.get("voice_rate", DEFAULT_VOICE_RATE) or DEFAULT_VOICE_RATE),
         font_name=str(saved.get("font_name", "") or ""),
         font_size=int(saved.get("font_size", 60) or 60),

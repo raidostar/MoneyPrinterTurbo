@@ -1216,6 +1216,25 @@ class TestPersonaPicker(unittest.TestCase):
         self.assertEqual(shorts.pending["script"], "대본을 조금 고쳤다")
         self.assertEqual(shorts.pending["product_persona"], "kimbujang")
 
+    def test_the_voice_follows_the_person(self):
+        """
+        화면에 저장된 목소리 하나를 그대로 쓰면 해린맘 대본을 남자 목소리가 읽는다.
+        사람이 없을 때까지 덮어쓰면 반대로 화면에서 맞춰 둔 값이 무시된다.
+        """
+        saved = "ko-KR-HyunsuMultilingualNeural-Male"
+        cases = [
+            ("haerinmom", bot.persona.PERSONAS["haerinmom"].voice),
+            ("kimbujang", bot.persona.PERSONAS["kimbujang"].voice),
+            ("없는사람", saved),
+            ("", saved),
+        ]
+        for named, expected in cases:
+            with self.subTest(persona=named):
+                with patch.object(bot.config, "ui", {"voice_name": saved}):
+                    params = bot._build_params("실리콘 주방집게", "대본", named)
+
+                self.assertEqual(params.voice_name, expected)
+
     def test_the_params_carry_the_person(self):
         params = bot._build_params("골프 거리측정기", "대본", "kimbujang")
 
