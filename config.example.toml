@@ -270,7 +270,9 @@ max_queued_tasks = 100
 # one-off video, but a channel wants a person — otherwise every video is spoken
 # by someone slightly different and nothing about it feels like one place.
 #
-# Available: haerinmom
+# The Telegram bot asks which one to write as whenever more than one is
+# registered, so this setting only decides the default for the screen and the
+# API. Available: haerinmom, kimbujang
 product_persona = "haerinmom"
 
 # -----------------------------------------------------------------------------

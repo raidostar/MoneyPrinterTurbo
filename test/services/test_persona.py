@@ -257,18 +257,41 @@ class TestRecordedOnTheTask(unittest.TestCase):
         # 지난 작업이 다른 사람 목소리로 되살아난다.
         self.assertEqual(params.product_persona, "")
 
-    def test_a_hand_written_script_records_no_speaker(self):
+    def test_a_supplied_script_records_who_the_caller_named(self):
+        """
+        화면과 봇은 대본을 먼저 만들어 넘긴다. 그 대본에도 화자가 있는데, 이미
+        대본이 있다는 이유로 지우면 기록에 아무도 안 남아 그 대본이 어떻게 나왔는지
+        되짚을 수 없다. 반대로 넘기는 쪽이 안 밝혔거나 모르는 이름을 줬을 때
+        설정에 적힌 사람을 끌어다 붙이면, 쓰지도 않은 사람이 기록에 남는다.
+        """
         from app.services import task as tm
 
-        params = self._params(video_script="내가 쓴 대본", product_persona="haerinmom")
-        with patch.object(tm.llm, "generate_script"):
-            tm.generate_script("task-id", params)
+        cases = [
+            # 밝힌 사람은 그대로 남는다
+            ({"product_persona": "haerinmom"}, "haerinmom"),
+            # 모르는 이름은 무명
+            ({"product_persona": "없는사람"}, ""),
+            # 사람이 직접 쓴 대본
+            ({"product_persona": ""}, ""),
+            # 제품 대본이 아니라고 해 놓고 이름만 붙인 것은 믿지 않는다.
+            # 여기서 만든 대본이 아니라 확인할 길이 없다.
+            ({"product_persona": "kimbujang", "script_style": "informative"}, ""),
+            # 직접 쓴 프롬프트로 만든 대본에는 사람이 붙지 않는다
+            (
+                {"product_persona": "kimbujang", "custom_system_prompt": "내 프롬프트"},
+                "",
+            ),
+        ]
+        for named, recorded in cases:
+            with self.subTest(**named):
+                params = self._params(video_script="넘겨받은 대본", **named)
+                with patch.object(
+                    persona.config, "app", {"product_persona": "kimbujang"}
+                ):
+                    with patch.object(tm.llm, "generate_script"):
+                        tm.generate_script("task-id", params)
 
-        self.assertEqual(params.product_persona, "")
-
-
-if __name__ == "__main__":
-    unittest.main()
+                self.assertEqual(params.product_persona, recorded)
 
 
 class TestTheRuleIsInOnePlace(unittest.TestCase):
@@ -317,3 +340,5 @@ class TestTheRuleIsInOnePlace(unittest.TestCase):
             tm.generate_script("task-id", params)
 
         key_for.assert_called_once_with("product", "", "")
+if __name__ == "__main__":
+    unittest.main()
