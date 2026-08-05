@@ -421,9 +421,9 @@ class TestProductVoices(unittest.TestCase):
     def test_there_is_more_than_one_voice(self):
         self.assertGreaterEqual(len(llm.PRODUCT_VOICES), 3)
 
-    def test_each_voice_asks_for_a_different_register(self):
+    def test_each_opening_asks_for_something_different(self):
         """
-        말투가 이름만 다르고 시키는 것이 같으면, 뽑아 써도 결과가 그대로다.
+        여는 방식이 이름만 다르고 시키는 것이 같으면, 뽑아 써도 결과가 그대로다.
         """
         bodies = set(llm.PRODUCT_VOICES.values())
         self.assertEqual(len(bodies), len(llm.PRODUCT_VOICES))
@@ -435,9 +435,9 @@ class TestProductVoices(unittest.TestCase):
 
     def test_another_voice_is_not_also_sent(self):
         """두 개가 같이 들어가면 서로 어긋난 지시를 받는다."""
-        prompt = self._prompt("diary")
+        prompt = self._prompt("days")
         for name, body in llm.PRODUCT_VOICES.items():
-            if name != "diary":
+            if name != "days":
                 self.assertNotIn(body, prompt)
 
     def test_the_structure_survives_every_voice(self):
@@ -455,23 +455,25 @@ class TestProductVoices(unittest.TestCase):
             llm.PRODUCT_VOICES[llm.DEFAULT_PRODUCT_VOICE], self._prompt("없는말투")
         )
 
-    def test_the_common_rules_do_not_fight_the_chosen_voice(self):
+    def test_the_common_rules_do_not_fight_the_speaker(self):
         """
-        공통 규칙이 한 말투를 못 박고 말투 쪽이 다른 것을 시키면, 모델은 둘 중
-        하나를 고른다. 대개 앞엣것이 이겨서 무엇을 뽑든 같은 대본이 나온다.
+        공통 규칙이 한 말투를 못 박고 화자 쪽이 다른 것을 시키면, 모델은 둘 중
+        하나를 고른다. 대개 앞엣것이 이겨서 누구로 쓰든 같은 대본이 나온다.
         """
         common = llm.script_style_prompt("product")
-        # 공통 부분에는 특정 어미를 못 박는 지시가 없어야 한다.
         for ending in ("~했음", "~하더라", "~거임", "~던듯", "~해요", "~했다"):
             self.assertNotIn(ending, common)
-        # 대신 말투 쪽을 따르라고 가리켜야 한다.
-        self.assertIn("the voice section", common)
+        self.assertIn("the speaker\n   section fixes the sentence endings", common)
 
-    def test_each_voice_names_its_own_endings(self):
-        """말투 쪽이 어미를 안 정하면 아무 데도 정한 곳이 없어진다."""
+    def test_an_opening_does_not_dictate_the_endings(self):
+        """
+        어미는 화자가 정한다. 여는 방식이 그것까지 정하면, 같은 사람이 영상마다
+        다른 말투로 말하는 채널이 된다.
+        """
         for name, body in llm.PRODUCT_VOICES.items():
-            with self.subTest(voice=name):
-                self.assertIn("~", body)
+            with self.subTest(opening=name):
+                for ending in ("~했음", "~해요", "~했다", "반말"):
+                    self.assertNotIn(ending, body)
 
     def test_an_unknown_voice_is_not_written_into_the_log(self):
         """
@@ -496,19 +498,19 @@ class TestProductVoices(unittest.TestCase):
         for style in ("informative", "story"):
             with self.subTest(style=style):
                 prompt = llm.build_script_prompt(
-                    video_subject="주제", script_style=style, product_voice="diary"
+                    video_subject="주제", script_style=style, product_voice="days"
                 )
-                self.assertNotIn(llm.PRODUCT_VOICES["diary"], prompt)
+                self.assertNotIn(llm.PRODUCT_VOICES["days"], prompt)
 
     def test_a_hand_written_prompt_is_not_overridden(self):
         """직접 쓴 프롬프트에 얹으면 그 사람이 정한 말투를 덮어쓴다."""
         prompt = llm.build_script_prompt(
             video_subject="주제",
             script_style="product",
-            product_voice="diary",
+            product_voice="days",
             custom_system_prompt="Only write two sentences.",
         )
-        self.assertNotIn(llm.PRODUCT_VOICES["diary"], prompt)
+        self.assertNotIn(llm.PRODUCT_VOICES["days"], prompt)
 
 
 class TestBreathBudget(unittest.TestCase):

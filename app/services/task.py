@@ -26,6 +26,7 @@ from app.services import (
     video,
     voice,
 )
+from app.services import persona as persona_service
 from app.services import upload_post
 from app.services import state as sm
 from app.utils import file_security, utils
@@ -279,9 +280,10 @@ def generate_script(task_id, params):
 
     video_script = params.video_script.strip()
     if video_script:
-        # 직접 쓴 대본에는 말투를 붙이지 않는다. 요청값이 그대로 남으면, 쓰이지도
-        # 않은 말투가 기록에 남아 그 대본이 그렇게 쓰인 것처럼 보인다.
+        # 직접 쓴 대본에는 말투도 사람도 붙지 않는다. 요청값이 그대로 남으면, 쓰이지
+        # 않은 값이 기록에 남아 그 대본이 그렇게 쓰인 것처럼 보인다.
         params.product_voice = ""
+        params.product_persona = ""
 
     if not video_script:
         # 매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 고르지
@@ -295,9 +297,19 @@ def generate_script(task_id, params):
             params.product_voice = llm.resolve_product_voice(
                 params.product_voice or llm.pick_product_voice()
             )
-            logger.info(f"product voice: {params.product_voice}")
+            # 채널마다 말하는 사람이 다르다. 요청에 없으면 설정에 적힌 사람을 쓰고,
+            # 실제로 쓰인 이름을 남긴다 — 모르는 이름은 사람 없이 쓰이므로 비운다.
+            speaker = persona_service.resolve(
+                params.product_persona
+            ) or persona_service.configured()
+            params.product_persona = speaker.key if speaker else ""
+            logger.info(
+                f"product voice: {params.product_voice}, "
+                f"persona: {params.product_persona or '(none)'}"
+            )
         else:
             params.product_voice = ""
+            params.product_persona = ""
 
         video_script = llm.generate_script(
             video_subject=params.video_subject,
@@ -307,6 +319,7 @@ def generate_script(task_id, params):
             custom_system_prompt=params.custom_system_prompt,
             script_style=params.script_style,
             product_voice=params.product_voice,
+            product_persona=params.product_persona,
         )
     else:
         logger.debug(f"video script: \n{video_script}")

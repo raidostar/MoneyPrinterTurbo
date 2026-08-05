@@ -12,6 +12,7 @@ from openai.types.chat import ChatCompletion
 
 from app.config import config
 from app.models.llm_provider import DEFAULT_LLM_PROVIDER_ID, get_llm_provider
+from app.services import persona
 
 _max_retries = 5
 MIN_SCRIPT_PARAGRAPH_NUMBER = 1
@@ -229,9 +230,9 @@ never watched.
 
 ## How it has to sound
 
-1. the register and the opening are set by the voice section at the end of this
-   prompt, not here. whatever it says about sentence endings and how to start,
-   follow it exactly — it is the last word on how this sounds.
+1. how this sounds is set at the end of this prompt, not here. the speaker
+   section fixes the sentence endings; the opening section fixes how to start.
+   both are the last word — follow them exactly.
 2. short sentences. ten to twelve words at most. a sentence can be two words.
 3. one idea per sentence. two ideas in one sentence gets heard as neither.
 4. specific over general, always. not "간편함" but "물 붓고 열 번 흔들면 끝".
@@ -269,47 +270,46 @@ never watched.
 # 같은 규칙으로 계속 쓰면 대본이 전부 한 사람 목소리가 된다. 몇 편만 이어 봐도
 # 기계가 썼다는 것이 보이고, 그때부터는 내용이 좋아도 안 믿는다. 구조는 그대로 두고
 # 말투와 여는 방식만 바꾼 판을 여러 개 두고 매번 하나를 뽑는다.
+# 채널 하나는 한 사람이 말하는 곳이라 말투는 고정한다. 그래도 매번 똑같이 열면
+# 몇 편만 이어 봐도 기계가 썼다는 것이 보이므로, 여는 방식만 바꿔 가며 쓴다. 실제
+# 사람도 그렇게 쓴다 — 같은 목소리로 어떤 날은 질문으로, 어떤 날은 사건으로 연다.
 PRODUCT_VOICES = {
-    "community": """
-## This one's voice: a post on a community board
+    "scene": """
+## How this one opens: in the middle of it going wrong
 
-Blunt, unpolished, typed fast. Korean endings ~했음, ~하더라, ~거임, ~던듯.
-Open mid-annoyance, as if continuing a thought you already started.
-No greeting, no self-introduction. Sentence fragments are fine.
-""".strip(),
-    "friend": """
-## This one's voice: telling a friend over coffee
-
-Casual spoken register — Korean 반말: ~했어, ~하더라고, ~거든, ~야.
-Open by addressing them directly about something you know they deal with.
-You can interrupt yourself and double back the way people do out loud.
-""".strip(),
-    "diary": """
-## This one's voice: a short log kept over days
-
-Quiet, factual, past tense — Korean ~했다, ~였다, or plain ~해요 if it fits better.
-Open on a specific day or count: 사흘째, 첫날, 두 달쯤 됐을 때.
-Mark time as you go. What changed should read as something you noticed, not
-something you decided.
+Start inside the moment, as if continuing a thought you already began. No
+greeting, no introducing yourself. The viewer works out the situation from what
+you are doing.
 """.strip(),
     "confession": """
-## This one's voice: admitting you were wrong about it
+## How this one opens: admitting you were wrong about it
 
-Slightly self-deprecating — Korean ~했는데, ~인 줄 알았음, ~였음.
-Open on the belief you held: you thought it was unnecessary, overpriced, a
-gimmick. Then what changed your mind, plainly.
-Do not turn the reversal into a punchline. State it and move on.
+Open on the belief you held — that it was unnecessary, overpriced, one more
+thing to store. Then what changed your mind, plainly. Do not turn the reversal
+into a punchline; state it and move on.
 """.strip(),
     "answer": """
-## This one's voice: answering a question you get asked
+## How this one opens: answering something you were asked
 
-Direct, informative, spoken politely — Korean ~해요, ~였어요, ~더라고요.
-Open on the question itself, as something a real person asked you.
-Answer it in order, the way you would if they were standing there.
-No rhetorical questions after the first line.
+Open on the question itself, as something a real person actually asked you.
+Answer it in the order you would if they were standing there. No rhetorical
+questions after the first line.
+""".strip(),
+    "days": """
+## How this one opens: a few days in
+
+Open on a count or a day — 사흘째, 첫날, 두 달쯤 됐을 때. Mark time as you go.
+What changed should read as something you noticed, not something you decided.
+""".strip(),
+    "compare": """
+## How this one opens: what you did before
+
+Open on the way you used to handle it, in one line, without judging it. Then the
+day that stopped working. The comparison carries the rest — you never have to
+say the new way is better.
 """.strip(),
 }
-DEFAULT_PRODUCT_VOICE = "community"
+DEFAULT_PRODUCT_VOICE = "scene"
 
 
 def resolve_product_voice(name: str) -> str:
@@ -848,6 +848,7 @@ def build_script_prompt(
     custom_system_prompt: str = "",
     script_style: str = "",
     product_voice: str = "",
+    product_persona: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -870,6 +871,11 @@ def build_script_prompt(
     # 말투는 제품 스타일에만 붙인다. 직접 쓴 프롬프트에 얹으면 그 사람이 정한
     # 말투를 이쪽에서 덮어쓰게 된다.
     if not custom_system_prompt and resolve_script_style(script_style) == "product":
+        # 화자를 먼저, 여는 방식을 나중에. 사람이 정해져 있으면 말투가 거기서
+        # 나오고, 여는 방식은 그 사람이 매번 다르게 고르는 것이다.
+        speaker = persona.resolve(product_persona)
+        if speaker is not None:
+            prompt += "\n\n" + speaker.as_prompt()
         prompt += "\n\n" + PRODUCT_VOICES[resolve_product_voice(product_voice)]
     # 주제, 언어, 추가 요구사항은 사용자가 쓴 글이라 규칙처럼 읽힐 수 있다. 헤드라인
     # 쪽과 같은 방식으로 경계를 표시하고 꺾쇠를 이스케이프해, 재료 쪽에서 구분자를
@@ -921,6 +927,7 @@ def generate_script(
     custom_system_prompt: str = "",
     script_style: str = "",
     product_voice: str = "",
+    product_persona: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -937,6 +944,7 @@ def generate_script(
         custom_system_prompt=custom_system_prompt,
         script_style=script_style,
         product_voice=product_voice,
+        product_persona=product_persona,
     )
     final_script = ""
     logger.info(
