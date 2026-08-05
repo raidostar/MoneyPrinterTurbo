@@ -99,8 +99,13 @@ class TestInThePrompt(unittest.TestCase):
         self.assertIn(persona.PERSONAS["haerinmom"].as_prompt(), prompt)
 
     def test_writing_without_one_still_works(self):
-        """일회성 영상은 사람 없이도 만들 수 있어야 한다."""
-        prompt = self._prompt(product_persona="")
+        """
+        일회성 영상은 사람 없이도 만들 수 있어야 한다. 설정에 아무도 안 적어 둔
+        상태가 그것이다 — 인자를 비우는 것은 "설정에 적힌 사람을 쓰라" 는 뜻이다.
+        """
+        with patch.object(persona.config, "app", {"product_persona": ""}):
+            prompt = self._prompt(product_persona="")
+
         self.assertNotIn("## Who is speaking", prompt)
         self.assertIn(llm.PRODUCT_VOICES["confession"], prompt)
 
@@ -121,6 +126,16 @@ class TestInThePrompt(unittest.TestCase):
             with self.subTest(style=style):
                 prompt = self._prompt(script_style=style, product_persona="haerinmom")
                 self.assertNotIn("## Who is speaking", prompt)
+
+    def test_the_configured_speaker_fills_an_empty_argument(self):
+        """
+        부르는 쪽이 이름을 안 넘겨도 사람이 붙어야 한다. 안 그러면 화면에서 만든
+        대본에만 사람이 빠진다.
+        """
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            prompt = self._prompt(product_persona="")
+
+        self.assertIn("## Who is speaking", prompt)
 
     def test_a_hand_written_prompt_is_not_overridden(self):
         prompt = self._prompt(
@@ -228,3 +243,51 @@ class TestRecordedOnTheTask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheRuleIsInOnePlace(unittest.TestCase):
+    """
+    화면과 작업이 각자 판단하면, 화면에서 만든 대본에는 사람이 붙었는데 기록에는
+    안 남는 일이 생긴다. 그러면 그 대본이 어떻게 나왔는지 되짚을 수 없다.
+    """
+
+    def test_a_product_script_gets_the_configured_speaker(self):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            self.assertEqual(persona.key_for("product", "", ""), "haerinmom")
+
+    def test_other_styles_get_nobody(self):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            for style in ("informative", "story"):
+                with self.subTest(style=style):
+                    self.assertEqual(persona.key_for(style, "", ""), "")
+
+    def test_a_hand_written_prompt_gets_nobody(self):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            self.assertEqual(persona.key_for("product", "Write two lines.", ""), "")
+
+    def test_a_typo_gets_nobody(self):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            self.assertEqual(persona.key_for("product", "", "haerinmomm"), "")
+
+    def test_the_task_layer_uses_it(self):
+        """
+        작업 쪽이 따로 판단하면 화면이 정한 사람과 기록이 갈린다.
+        """
+        from app.services import task as tm
+
+        from app.models.schema import VideoParams
+
+        params = VideoParams(
+            video_subject="주제", video_script="", script_style="product"
+        )
+        with (
+            patch.object(persona.config, "app", {"product_persona": "haerinmom"}),
+            patch.object(tm.llm, "pick_product_voice", return_value="days"),
+            patch.object(tm.llm, "generate_script", return_value="대본"),
+            patch.object(
+                tm.persona_service, "key_for", return_value="haerinmom"
+            ) as key_for,
+        ):
+            tm.generate_script("task-id", params)
+
+        key_for.assert_called_once_with("product", "", "")

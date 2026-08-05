@@ -297,10 +297,11 @@ def generate_script(task_id, params):
             params.product_voice = llm.resolve_product_voice(
                 params.product_voice or llm.pick_product_voice()
             )
-            # 고르는 규칙은 프롬프트를 만드는 쪽과 같은 함수를 쓴다. 여기서 따로
-            # 정하면 기록에 남는 이름과 실제로 쓰인 사람이 갈린다.
-            speaker = persona_service.for_script(params.product_persona)
-            params.product_persona = speaker.key if speaker else ""
+            # 고르는 규칙은 화면 쪽과 같은 함수를 쓴다. 여기서 따로 정하면 기록에
+            # 남는 이름과 실제로 쓰인 사람이 갈린다.
+            params.product_persona = persona_service.key_for(
+                params.script_style, params.custom_system_prompt, params.product_persona
+            )
             logger.info(
                 f"product voice: {params.product_voice}, "
                 f"persona: {params.product_persona or '(none)'}"
