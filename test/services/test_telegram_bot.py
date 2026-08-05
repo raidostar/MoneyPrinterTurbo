@@ -1179,6 +1179,30 @@ class TestPersonaPicker(unittest.TestCase):
 
         self.assertEqual(shorts.pending["product_persona"], "kimbujang")
 
+    def test_a_retry_asks_the_same_person(self):
+        """
+        다시 뽑기는 같은 사람에게 다시 쓰라는 뜻이다. 화자를 안 넘기면 한 번
+        누를 때마다 고른 것과 다른 말투가 나오고, 기록에도 아무도 안 남는다.
+        """
+        shorts = self._bot()
+        shorts.subjects = {"tok": "골프 거리측정기"}
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(bot.llm, "generate_script", return_value="대본") as generate,
+            patch.object(bot.threading, "Thread") as thread,
+        ):
+            thread.side_effect = lambda target, args, daemon: SimpleNamespace(
+                start=lambda: target(*args)
+            )
+            shorts.handle_update(_callback(111, "persona:tok:kimbujang"))
+            shorts.handle_update(
+                _callback(111, f"retry:{shorts.pending['draft_id']}")
+            )
+
+        self.assertEqual(generate.call_args.kwargs["product_persona"], "kimbujang")
+        self.assertEqual(shorts.pending["product_persona"], "kimbujang")
+
     def test_an_edited_script_keeps_the_person(self):
         """
         보여 준 대본을 손봐서 다시 보낸 것이지 새로 쓴 것이 아니다. 여기서 화자를

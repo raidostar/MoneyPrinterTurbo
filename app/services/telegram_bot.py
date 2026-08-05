@@ -692,7 +692,10 @@ class ShortsBot:
         elif action == "retry":
             subject = self.pending.get("subject", "")
             if subject:
-                self._draft_script(subject)
+                # 다시 뽑는 것은 같은 사람에게 다시 쓰라는 뜻이다. 여기서 화자를
+                # 안 넘기면 한 번 누를 때마다 무명 대본이 되어, 고른 것과 다른
+                # 말투가 나오고 기록에도 아무도 안 남는다.
+                self._draft_script(subject, self.pending.get("product_persona", ""))
         elif action == "cancel":
             self.pending = {}
             _send(self.chat_id, "취소했어요.")
