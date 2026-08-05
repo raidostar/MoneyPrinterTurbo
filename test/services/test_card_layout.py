@@ -615,3 +615,138 @@ class TestSubtitlePlacementAndCorners(unittest.TestCase):
             a.close()
             b.close()
             source.close()
+
+
+class TestPlatformSafeArea(unittest.TestCase):
+    """
+    같은 영상을 세 곳에 올린다. 인스타 릴스가 화면 아래를 캡션과 버튼으로 가장
+    넓게 덮으므로 거기에 맞춘다. 예전에는 유튜브 쇼츠만 보고 잡아서, 자막이
+    릴스 캡션 바에 묻혔다.
+    """
+
+    def _params(self, font_size=60, ratio=0.58, below=True):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            font_size=font_size,
+            subtitle_below_video=below,
+            layout="card",
+            layout_video_height_ratio=ratio,
+        )
+
+    def _subtitle_bottom(self, canvas_height, params, headline_height=200):
+        """자막이 끝나는 세로 좌표. 화면 아래에서 얼마나 떨어지는지 보려는 것."""
+        from types import SimpleNamespace
+
+        from app.services.video import (
+            MIN_CARD_VIDEO_HEIGHT_RATIO,
+            _reserved_margin,
+            _subtitle_below_position,
+            _subtitle_gap,
+        )
+
+        reserved = _reserved_margin(
+            params, SimpleNamespace(h=headline_height), canvas_height
+        )
+        band = min(
+            int(canvas_height * params.layout_video_height_ratio),
+            canvas_height - 2 * reserved,
+        )
+        band = max(int(canvas_height * MIN_CARD_VIDEO_HEIGHT_RATIO), band)
+        clip_height = int(params.font_size * 2.4)
+        top = _subtitle_below_position(
+            canvas_height, band, clip_height, gap=_subtitle_gap(params)
+        )
+        return top + clip_height
+
+    def test_the_subtitle_clears_the_caption_bar(self):
+        """자막 아래가 캡션 바에 물리면 읽을 수 없다."""
+        from app.services import safe_area
+
+        canvas = 1920
+        for font_size in (48, 60, 72, 90):
+            for ratio in (0.4, 0.55, 0.58, 0.62, 0.8):
+                with self.subTest(font_size=font_size, ratio=ratio):
+                    bottom = self._subtitle_bottom(
+                        canvas, self._params(font_size, ratio)
+                    )
+                    self.assertLessEqual(bottom, canvas - safe_area.bottom(canvas))
+
+    def test_the_reserve_grows_for_the_platform_ui(self):
+        """
+        자막 높이만 비워 두면 자막이 캡션 바에 딱 붙는다. 덮이는 만큼도 비워야
+        한다.
+        """
+        from app.services import safe_area
+        from app.services.video import _reserved_margin
+
+        canvas = 1920
+        reserved = _reserved_margin(self._params(), None, canvas)
+
+        self.assertGreater(reserved, int(60 * 2.4))
+        self.assertGreaterEqual(reserved, safe_area.bottom(canvas))
+
+    def test_a_fullscreen_layout_reserves_nothing_extra(self):
+        """
+        자막을 영상 위에 얹는 구성에는 아래 여백을 비울 이유가 없다. 비우면 영상만
+        괜히 작아진다.
+        """
+        from app.services.video import _reserved_margin
+
+        self.assertEqual(_reserved_margin(self._params(below=False), None, 1920), 0)
+
+    def test_the_band_shrinks_rather_than_the_subtitle_sinking(self):
+        """
+        요청한 비율을 그대로 두면 자막이 아래로 밀린다. 영상을 줄여서 자리를 만든다.
+        """
+        from types import SimpleNamespace
+
+        from app.services.video import _reserved_margin
+
+        canvas = 1920
+        reserved = _reserved_margin(self._params(ratio=0.58), SimpleNamespace(h=200), canvas)
+        band = min(int(canvas * 0.58), canvas - 2 * reserved)
+
+        self.assertLess(band, int(canvas * 0.58))
+
+    def test_both_renderers_use_the_same_bottom_reserve(self):
+        """
+        값이 갈라지면 카드뉴스와 쇼츠 중 한쪽만 안전해진다. 한 벌로 세 곳에 올리는
+        것이 전제다.
+        """
+        from app.services import cardnews, safe_area
+
+        self.assertEqual(cardnews.BOTTOM_SAFE_RATIO, safe_area.BOTTOM_RATIO)
+
+    def test_the_reserve_scales_with_the_canvas(self):
+        """세로 길이가 다른 캔버스에서도 같은 비율만큼 비워야 한다."""
+        from app.services import safe_area
+
+        self.assertEqual(safe_area.bottom(1920) * 2, safe_area.bottom(3840))
+
+    def test_the_rendered_band_leaves_room_below(self):
+        """
+        직접 부르는 시험만 두면, 실제 합성 경로가 캔버스 높이를 넘겨주지 않아도
+        드러나지 않는다. 예전 버그가 정확히 그 모양이었다.
+        """
+        from moviepy import ColorClip
+
+        from app.models.schema import VideoParams
+        from app.services import safe_area
+        from app.services.video import apply_card_layout
+
+        canvas = 1920
+        params = VideoParams(
+            video_subject="주제",
+            layout="card",
+            subtitle_below_video=True,
+            font_size=60,
+            layout_video_height_ratio=0.58,
+        )
+        with ColorClip(size=(1080, canvas), color=(0, 0, 0)).with_duration(0.2) as clip:
+            composed, band = apply_card_layout(clip, params)
+            composed.close()
+
+        # 띠 아래 여백에 자막과 플랫폼 UI 자리가 함께 들어가야 한다.
+        below = canvas - (canvas + band) // 2
+        self.assertGreaterEqual(below, int(60 * 2.4) + safe_area.bottom(canvas))
