@@ -257,6 +257,26 @@ max_concurrent_tasks = 5
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------
+# Cloudflare R2 / 영상 임시 보관
+# -----------------------------------------------------------------------------
+
+# Instagram and Threads do not accept a file. You give them a public URL and
+# they fetch it themselves. The rendered video only exists on this machine, so
+# it has to be put somewhere reachable first.
+#
+# Use a bucket of its own, not one holding anything else. Nothing here needs to
+# be public: the code signs a URL that stops working after an hour, and deletes
+# the file once the post is up.
+#
+# Create the bucket and an API token at https://dash.cloudflare.com/ -> R2.
+# The token needs Object Read & Write on that one bucket, nothing more.
+# Install the client with `uv sync --extra storage`.
+r2_account_id = ""
+r2_access_key_id = ""
+r2_secret_access_key = ""
+r2_bucket = ""
+
+# -----------------------------------------------------------------------------
 # GitHub / 저장소 살펴보기
 # -----------------------------------------------------------------------------
 
