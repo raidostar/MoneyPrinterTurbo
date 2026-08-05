@@ -44,6 +44,14 @@ twelvelabs = [
     "twelvelabs>=1.2.8",
 ]
 
+# 인스타그램과 스레드는 영상 파일을 받지 않는다. 공개 주소를 주면 그쪽에서 가져간다.
+# 만든 영상은 이 기계에만 있으므로 어딘가에 올려 두고 주소를 넘겨야 하고, R2 는
+# S3 API 를 쓴다. 올리지 않는 사람에게까지 지울 이유가 없어 선택으로 둔다.
+# `uv sync --extra storage` 로 설치한다.
+storage = [
+    "boto3>=1.35",
+]
+
 [dependency-groups]
 dev = [
     "coverage==7.15.1",
