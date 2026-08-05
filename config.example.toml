@@ -257,6 +257,23 @@ max_concurrent_tasks = 5
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------
+# 대본을 쓰는 사람
+# -----------------------------------------------------------------------------
+
+# The script is written in the first person. Unless you say who that person is,
+# every video is spoken by someone slightly different, and a channel is the one
+# place that cannot afford to be. Naming a persona fixes the sentence endings,
+# the places the scenes come from, and the words that person would never use.
+#
+# The registry lives in app/services/persona.py. Leave this empty to write
+# without one; a plain default register is used instead. That is fine for a
+# one-off video, but a channel wants a person — otherwise every video is spoken
+# by someone slightly different and nothing about it feels like one place.
+#
+# Available: haerinmom
+product_persona = "haerinmom"
+
+# -----------------------------------------------------------------------------
 # Cloudflare R2 / 영상 임시 보관
 # -----------------------------------------------------------------------------
 

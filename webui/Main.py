@@ -43,7 +43,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
-from app.services import cache_manager, llm, video, voice, webui_task
+from app.services import cache_manager, llm, persona, video, voice, webui_task
 from app.services import elevenlabs_music as elevenlabs_music_service
 from app.services import sonilo as sonilo_service
 from app.services import state as sm
@@ -952,6 +952,9 @@ def _apply_pending_task_restore():
     st.session_state["video_script_prompt"] = params.get("video_script_prompt") or ""
     script_style = params.get("script_style") or llm.DEFAULT_SCRIPT_STYLE
     st.session_state["script_style"] = script_style
+    # 지난 작업을 불러오면 그때 쓰인 화자도 같이 살아나야 한다. 안 그러면 같은
+    # 대본을 다시 만들 때 다른 사람이 말한다.
+    st.session_state["product_persona"] = params.get("product_persona") or ""
     _set_stable_widget_value("script_style_select", script_style)
     st.session_state["custom_system_prompt"] = params.get(
         "custom_system_prompt"
@@ -2229,6 +2232,12 @@ def _render_script_settings(panel, params):
                         on_change=reset_script_system_prompt,
                     )
                     st.session_state["script_style"] = params.script_style
+                    # 대본을 만들 때 정해진 화자를 작업까지 가져간다. 여기서 안
+                    # 실으면 화면에서 만든 대본에는 사람이 붙었는데 기록에는 안
+                    # 남아, 그 대본이 어떻게 나왔는지 되짚을 수 없다.
+                    params.product_persona = st.session_state.get(
+                        "product_persona", ""
+                    )
 
                     system_prompt = st.text_area(
                         tr("Custom System Prompt"),
@@ -2269,6 +2278,7 @@ def _render_script_settings(panel, params):
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
                                 script_style=params.script_style,
+                                product_persona=params.product_persona,
                             )
                         )
 
@@ -2286,6 +2296,12 @@ def _render_script_settings(panel, params):
                 else:
                     with st.spinner(tr("Generating Video Script and Keywords")):
                         with config.runtime_config_lock():
+                            params.product_persona = persona.key_for(
+                                params.script_style,
+                                params.custom_system_prompt,
+                                params.product_persona,
+                            )
+                            st.session_state["product_persona"] = params.product_persona
                             script = llm.generate_script(
                                 video_subject=params.video_subject,
                                 language=params.video_language,
@@ -2293,6 +2309,7 @@ def _render_script_settings(panel, params):
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
                                 script_style=params.script_style,
+                                product_persona=params.product_persona,
                             )
                             terms = llm.generate_terms(
                                 params.video_subject,

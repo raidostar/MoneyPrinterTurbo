@@ -17,6 +17,7 @@ SCRIPT_DATA = {
         "video_subject": "닭가슴살 200개 먹고 나서야 알게 된 것",
         "video_language": "ko-KR",
         "script_style": "story",
+        "product_persona": "haerinmom",
         "layout": "card",
         "headline": "200개째 깨달았다\n문제는 닭이 아니었다",
         # 저장된 설정이나 기본값과 우연히 같으면, 불러오지 않아도 테스트가 통과한다.
@@ -79,6 +80,15 @@ class TestRestoreFromUrl(unittest.TestCase):
         )
         self.assertEqual(app.session_state["layout_corner_radius_slider"], 12)
         self.assertEqual(app.session_state["headline_font_size_slider"], 64)
+
+    def test_the_speaker_comes_back_too(self):
+        """
+        지난 작업을 불러오면 그때 쓰인 화자도 같이 살아나야 한다. 안 그러면 같은
+        대본을 다시 만들 때 다른 사람이 말한다.
+        """
+        app = _app_with_task(self.tmp_path, {"task": TASK_ID})
+
+        self.assertEqual(app.session_state["product_persona"], "haerinmom")
 
     def test_an_unknown_task_does_not_break_the_page(self):
         """

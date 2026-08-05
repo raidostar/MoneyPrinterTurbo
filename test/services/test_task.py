@@ -89,6 +89,7 @@ class TestTaskService(unittest.TestCase):
             custom_system_prompt="Only write short narration.",
             script_style="story",
             product_voice="",
+            product_persona="",
         )
 
     def test_generate_final_videos_forwards_clip_speed(self):
@@ -1609,18 +1610,18 @@ class TestProductVoiceIsRecorded(unittest.TestCase):
     def test_a_voice_is_picked_and_kept(self):
         params = self._params()
         with (
-            patch.object(tm.llm, "pick_product_voice", return_value="diary") as pick,
+            patch.object(tm.llm, "pick_product_voice", return_value="days") as pick,
             patch.object(tm.llm, "generate_script", return_value="대본") as generate,
         ):
             tm.generate_script("task-id", params)
 
         pick.assert_called_once()
-        self.assertEqual(params.product_voice, "diary")
-        self.assertEqual(generate.call_args.kwargs["product_voice"], "diary")
+        self.assertEqual(params.product_voice, "days")
+        self.assertEqual(generate.call_args.kwargs["product_voice"], "days")
 
     def test_a_voice_that_was_asked_for_is_left_alone(self):
         """지난 작업을 되살렸을 때 다른 말투로 만들어지면 안 된다."""
-        params = self._params(product_voice="friend")
+        params = self._params(product_voice="answer")
         with (
             patch.object(tm.llm, "pick_product_voice") as pick,
             patch.object(tm.llm, "generate_script", return_value="대본") as generate,
@@ -1628,12 +1629,12 @@ class TestProductVoiceIsRecorded(unittest.TestCase):
             tm.generate_script("task-id", params)
 
         pick.assert_not_called()
-        self.assertEqual(generate.call_args.kwargs["product_voice"], "friend")
+        self.assertEqual(generate.call_args.kwargs["product_voice"], "answer")
 
     def test_other_styles_do_not_pick_one(self):
         # 스타일을 바꾸기 전에 골라 둔 말투가 남아 있을 수 있다. 그대로 기록되면
         # 경험담 대본에 쓰이지도 않은 제품 말투가 붙어 있게 된다.
-        params = self._params(script_style="story", product_voice="diary")
+        params = self._params(script_style="story", product_voice="days")
         with (
             patch.object(tm.llm, "pick_product_voice") as pick,
             patch.object(tm.llm, "generate_script", return_value="대본"),
@@ -1686,7 +1687,7 @@ class TestProductVoiceIsRecorded(unittest.TestCase):
         직접 쓴 대본에는 말투가 붙지 않는다. 요청값이 그대로 남으면 그 대본이
         그 말투로 쓰인 것처럼 보인다.
         """
-        params = self._params(video_script="내가 쓴 대본", product_voice="diary")
+        params = self._params(video_script="내가 쓴 대본", product_voice="days")
         with patch.object(tm.llm, "generate_script") as generate:
             tm.generate_script("task-id", params)
 
