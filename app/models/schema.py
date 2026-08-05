@@ -209,6 +209,8 @@ class VideoScriptParams:
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
     script_style: str = Field(default="informative", max_length=32)
+    # 대본을 쓰는 사람. 비워 두면 설정에 적힌 사람을 쓴다.
+    product_persona: str = Field(default="", max_length=32)
 
 
 class VideoTermsParams:

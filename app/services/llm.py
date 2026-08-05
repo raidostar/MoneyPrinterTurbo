@@ -873,7 +873,7 @@ def build_script_prompt(
     if not custom_system_prompt and resolve_script_style(script_style) == "product":
         # 화자를 먼저, 여는 방식을 나중에. 사람이 정해져 있으면 말투가 거기서
         # 나오고, 여는 방식은 그 사람이 매번 다르게 고르는 것이다.
-        speaker = persona.resolve(product_persona)
+        speaker = persona.for_script(product_persona)
         if speaker is not None:
             prompt += "\n\n" + speaker.as_prompt()
         prompt += "\n\n" + PRODUCT_VOICES[resolve_product_voice(product_voice)]

@@ -130,6 +130,39 @@ class TestInThePrompt(unittest.TestCase):
         self.assertNotIn("## Who is speaking", prompt)
 
 
+class TestOneResolutionPath(unittest.TestCase):
+    """
+    고르는 자리가 여럿이면 화면에서 만든 대본과 작업으로 만든 대본이 서로 다른
+    사람 목소리로 나온다.
+    """
+
+    def test_no_name_means_the_configured_speaker(self):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            self.assertEqual(persona.for_script("").key, "haerinmom")
+
+    def test_a_name_given_is_used_as_given(self):
+        with patch.object(persona.config, "app", {"product_persona": ""}):
+            self.assertEqual(persona.for_script("haerinmom").key, "haerinmom")
+
+    def test_a_typo_does_not_become_the_configured_speaker(self):
+        """
+        둘을 같이 다루면 오타 하나가 설정에 적힌 사람으로 조용히 바뀐다.
+        """
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            self.assertIsNone(persona.for_script("haerinmomm"))
+
+    def test_the_prompt_builder_uses_the_same_rule(self):
+        """
+        화면에서 만드는 대본도 설정에 적힌 사람으로 써야 한다. 부르는 쪽이
+        이름을 안 넘겨도 사람이 붙어야 한다.
+        """
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            prompt = llm.build_script_prompt(
+                video_subject="주제", script_style="product"
+            )
+        self.assertIn(persona.PERSONAS["haerinmom"].as_prompt(), prompt)
+
+
 class TestRecordedOnTheTask(unittest.TestCase):
     def _params(self, **overrides):
         from app.models.schema import VideoParams
@@ -153,12 +186,8 @@ class TestRecordedOnTheTask(unittest.TestCase):
         return generate
 
     def test_the_configured_speaker_is_used_and_recorded(self):
-        from app.services import task as tm
-
         params = self._params()
-        with patch.object(
-            tm.persona_service, "configured", return_value=persona.PERSONAS["haerinmom"]
-        ):
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
             generate = self._generate(params)
 
         self.assertEqual(params.product_persona, "haerinmom")
@@ -166,13 +195,10 @@ class TestRecordedOnTheTask(unittest.TestCase):
 
     def test_a_speaker_asked_for_wins_over_the_setting(self):
         """지난 작업을 되살렸을 때 다른 사람이 말하면 안 된다."""
-        from app.services import task as tm
-
         params = self._params(product_persona="haerinmom")
-        with patch.object(tm.persona_service, "configured") as configured:
+        with patch.object(persona.config, "app", {"product_persona": ""}):
             generate = self._generate(params)
 
-        configured.assert_not_called()
         self.assertEqual(generate.call_args.kwargs["product_persona"], "haerinmom")
 
     def test_an_unknown_name_is_recorded_as_none(self):
@@ -180,12 +206,14 @@ class TestRecordedOnTheTask(unittest.TestCase):
         모르는 이름은 사람 없이 쓰인다. 요청값을 그대로 남기면 그 사람이 쓴
         것처럼 보인다.
         """
-        from app.services import task as tm
-
         params = self._params(product_persona="없는사람")
-        with patch.object(tm.persona_service, "configured", return_value=None):
+        with patch.object(
+            persona.config, "app", {"product_persona": "haerinmom"}
+        ):
             self._generate(params)
 
+        # 설정에 사람이 적혀 있어도 그리로 조용히 바뀌면 안 된다. 오타 하나로
+        # 지난 작업이 다른 사람 목소리로 되살아난다.
         self.assertEqual(params.product_persona, "")
 
     def test_a_hand_written_script_records_no_speaker(self):

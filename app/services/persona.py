@@ -118,3 +118,17 @@ def resolve(name: str) -> Persona | None:
 def configured() -> Persona | None:
     """설정에 적힌 사람. 안 적었으면 ``None``."""
     return resolve(str(config.app.get("product_persona", "") or ""))
+
+
+def for_script(requested: str) -> Persona | None:
+    """
+    이번 대본을 쓸 사람. 사람 없이 쓸 때는 ``None``.
+
+    이름을 준 것과 안 준 것을 가른다. 안 줬으면 설정에 적힌 사람을 쓰고, 줬는데
+    모르는 이름이면 사람 없이 쓴다. 둘을 같이 다루면 오타 하나가 설정에 적힌
+    사람으로 조용히 바뀌어, 지난 작업을 되살렸을 때 다른 사람이 말하게 된다.
+
+    고르는 자리는 여기 하나뿐이다. 부르는 쪽마다 정하면 화면에서 만든 대본과
+    작업으로 만든 대본이 서로 다른 사람 목소리로 나온다.
+    """
+    return resolve(requested) if str(requested or "").strip() else configured()

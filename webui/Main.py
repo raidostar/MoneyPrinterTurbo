@@ -2269,6 +2269,7 @@ def _render_script_settings(panel, params):
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
                                 script_style=params.script_style,
+                                product_persona=params.product_persona,
                             )
                         )
 
@@ -2293,6 +2294,7 @@ def _render_script_settings(panel, params):
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
                                 script_style=params.script_style,
+                                product_persona=params.product_persona,
                             )
                             terms = llm.generate_terms(
                                 params.video_subject,

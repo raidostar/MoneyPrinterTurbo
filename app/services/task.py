@@ -297,11 +297,9 @@ def generate_script(task_id, params):
             params.product_voice = llm.resolve_product_voice(
                 params.product_voice or llm.pick_product_voice()
             )
-            # 채널마다 말하는 사람이 다르다. 요청에 없으면 설정에 적힌 사람을 쓰고,
-            # 실제로 쓰인 이름을 남긴다 — 모르는 이름은 사람 없이 쓰이므로 비운다.
-            speaker = persona_service.resolve(
-                params.product_persona
-            ) or persona_service.configured()
+            # 고르는 규칙은 프롬프트를 만드는 쪽과 같은 함수를 쓴다. 여기서 따로
+            # 정하면 기록에 남는 이름과 실제로 쓰인 사람이 갈린다.
+            speaker = persona_service.for_script(params.product_persona)
             params.product_persona = speaker.key if speaker else ""
             logger.info(
                 f"product voice: {params.product_voice}, "
