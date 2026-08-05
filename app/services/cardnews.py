@@ -17,6 +17,7 @@ import numpy as np
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 
+from app.services import safe_area
 from app.utils import utils
 
 # 세로 영상 기준. 카드 한 장이 화면 하나다.
@@ -32,8 +33,9 @@ EMPTY_BAR_COLOR = "#E5E7EB"
 TITLE_FONT = "Pretendard-Bold.ttf"
 BODY_FONT = "Pretendard-Regular.ttf"
 
-# 유튜브 쇼츠는 화면 아래쪽에 제목·채널명·버튼을 얹는다. 그 자리에 글을 두면 가려진다.
-BOTTOM_SAFE_RATIO = 0.16
+# 플랫폼이 화면 아래에 캡션과 버튼을 얹는다. 그 자리에 글을 두면 가려진다.
+# 쇼츠 템플릿과 같은 값을 써야 한 벌로 세 곳에 다 올릴 수 있다.
+BOTTOM_SAFE_RATIO = safe_area.BOTTOM_RATIO
 SIDE_MARGIN_RATIO = 0.09
 TOP_MARGIN_RATIO = 0.14
 

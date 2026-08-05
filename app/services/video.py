@@ -36,7 +36,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
-from app.services import llm
+from app.services import llm, safe_area
 from app.services.utils import video_effects
 from app.utils import file_security, utils
 
@@ -1181,21 +1181,37 @@ def _subtitle_below_position(
     return bottom_margin_top + gap
 
 
-def _reserved_margin(params, headline_clip) -> int:
+def _reserved_margin(params, headline_clip, canvas_height: int) -> int:
     """
     영상 위아래에 반드시 비워 둬야 하는 높이를 잰다.
 
     비율만 믿으면 1.0 을 받았을 때 여백이 0 이 되어, 헤드라인은 영상 위에 겹치고
     아래 자막은 화면 밖으로 밀린다. 영상은 캔버스 중앙에 놓이므로 위아래 여백이
     같고, 둘 중 큰 쪽만 확보하면 양쪽 다 확보된다.
+
+    ``canvas_height`` 에 기본값을 두지 않는다. 빠뜨리면 플랫폼이 덮는 만큼이 0 이
+    되어, 예전처럼 자막이 캡션 바에 묻힌 채로 조용히 지나간다.
+
+    자막을 영상 아래에 놓을 때는 자막 높이만으로 모자란다. 그 아래를 플랫폼이
+    캡션과 버튼으로 덮기 때문에, 자막이 딱 붙어 있으면 거기 묻힌다. 덮이는 만큼도
+    함께 비워 둔다.
     """
     reserved = 0
     if headline_clip is not None:
         reserved = max(reserved, headline_clip.h)
     if _subtitle_below_video_enabled(params):
         # 자막은 이 함수보다 나중에 만들어져 높이를 잴 수 없다. 두 줄 기준으로 잡는다.
-        reserved = max(reserved, int(params.font_size * 2.4))
+        subtitle_height = int(params.font_size * 2.4)
+        reserved = max(
+            reserved,
+            subtitle_height + _subtitle_gap(params) + safe_area.bottom(canvas_height),
+        )
     return reserved
+
+
+def _subtitle_gap(params) -> int:
+    """영상과 자막 사이 간격. 붙여 놓으면 자막이 영상의 일부처럼 보인다."""
+    return int(params.font_size * 0.5)
 
 
 def _rounded_mask(width: int, height: int, radius: int, duration: float):
@@ -1229,10 +1245,17 @@ def apply_card_layout(video_clip, params, font_path: str = ""):
     """
     canvas_width, canvas_height = video_clip.size
     headline = _headline_clip(params, font_path, canvas_width, video_clip.duration)
+    requested_height = int(canvas_height * params.layout_video_height_ratio)
     target_height = min(
-        int(canvas_height * params.layout_video_height_ratio),
-        canvas_height - 2 * _reserved_margin(params, headline),
+        requested_height,
+        canvas_height - 2 * _reserved_margin(params, headline, canvas_height),
     )
+    if target_height < requested_height:
+        # 조용히 줄이면 화면에서 고른 비율과 나온 영상이 다른 이유를 알 수 없다.
+        logger.info(
+            f"video band reduced to fit the headline and subtitle: "
+            f"{requested_height} -> {target_height} px"
+        )
     # 여백을 확보하다 영상이 사라져서는 안 된다. 얹을 것이 아무리 커도 영상이
     # 화면의 주인공이다.
     floor = int(canvas_height * MIN_CARD_VIDEO_HEIGHT_RATIO)
@@ -1544,7 +1567,7 @@ def generate_video(
                         video_height,
                         card_band_height,
                         _clip.h,
-                        gap=int(params.font_size * 0.5),
+                        gap=_subtitle_gap(params),
                     ),
                 )
             )
