@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from app.config import config
+from app.utils import file_security, utils
 
 # 주소가 살아 있는 시간. 인스타그램은 컨테이너를 만들 때 영상을 가져가고, 긴
 # 영상은 그 처리에 몇 분이 걸린다. 넉넉하게 두되 하루씩 열어 두지는 않는다.
@@ -114,8 +115,15 @@ def put(local_path: str, key: str) -> StoredFile | None:
         logger.info("storage is not configured; skipping the upload")
         return None
 
-    if not os.path.exists(local_path):
-        logger.warning("nothing to upload; the file is gone")
+    # 올릴 것은 우리가 만든 영상뿐이다. 경로를 그대로 믿으면 부르는 쪽의 실수 하나로
+    # 이 기계의 아무 파일이나 남의 서버에 올라간다. 심볼릭 링크로 밖을 가리키는
+    # 경우까지 공용 검사기가 잡는다.
+    try:
+        local_path = file_security.resolve_path_within_directory(
+            utils.task_dir(), local_path
+        )
+    except (ValueError, OSError) as exc:
+        logger.warning(f"refusing to upload from outside the task directory: {exc}")
         return None
 
     size = os.path.getsize(local_path)

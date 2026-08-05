@@ -59,9 +59,18 @@ class TestKeyNames(unittest.TestCase):
 
 class TestUpload(unittest.TestCase):
     def setUp(self):
+        # 올릴 수 있는 곳은 작업 디렉터리 안뿐이다.
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.video = os.path.join(self.directory.name, "final-1.mp4")
+        tasks = os.path.join(self.directory.name, "tasks", "e9e4fa32")
+        os.makedirs(tasks)
+        patcher = patch.object(
+            storage.utils, "task_dir", return_value=os.path.join(self.directory.name, "tasks")
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.video = os.path.join(tasks, "final-1.mp4")
         with open(self.video, "wb") as handle:
             handle.write(b"video bytes")
 
@@ -108,6 +117,44 @@ class TestUpload(unittest.TestCase):
         os.remove(self.video)
         stored, client = self._put()
         self.assertIsNone(stored)
+        client.upload_file.assert_not_called()
+
+    def test_a_file_outside_the_task_directory_is_refused(self):
+        """
+        경로를 그대로 믿으면 부르는 쪽의 실수 하나로 이 기계의 아무 파일이나 남의
+        서버에 올라간다.
+        """
+        outside = os.path.join(self.directory.name, "secret.pem")
+        with open(outside, "wb") as handle:
+            handle.write(b"private key")
+
+        client = MagicMock()
+        with _config():
+            with patch.object(storage, "_client", return_value=client):
+                for path in (outside, "/etc/hosts", "../secret.pem"):
+                    with self.subTest(path=path):
+                        self.assertIsNone(storage.put(path, "k"))
+        client.upload_file.assert_not_called()
+
+    def test_a_symlink_pointing_outside_is_refused(self):
+        """링크를 따라가면 검사가 있으나 마나다."""
+        outside = os.path.join(self.directory.name, "secret.pem")
+        with open(outside, "wb") as handle:
+            handle.write(b"private key")
+        link = os.path.join(os.path.dirname(self.video), "innocent.mp4")
+        os.symlink(outside, link)
+
+        client = MagicMock()
+        with _config():
+            with patch.object(storage, "_client", return_value=client):
+                self.assertIsNone(storage.put(link, "k"))
+        client.upload_file.assert_not_called()
+
+    def test_a_directory_is_not_a_video(self):
+        client = MagicMock()
+        with _config():
+            with patch.object(storage, "_client", return_value=client):
+                self.assertIsNone(storage.put(os.path.dirname(self.video), "k"))
         client.upload_file.assert_not_called()
 
     def test_an_oversized_file_is_refused(self):
