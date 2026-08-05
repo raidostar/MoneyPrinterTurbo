@@ -267,13 +267,24 @@ class TestRecordedOnTheTask(unittest.TestCase):
         from app.services import task as tm
 
         cases = [
-            ("haerinmom", "haerinmom"),  # 밝힌 사람은 그대로 남는다
-            ("없는사람", ""),  # 모르는 이름은 무명
-            ("", ""),  # 사람이 직접 쓴 대본
+            # 밝힌 사람은 그대로 남는다
+            ({"product_persona": "haerinmom"}, "haerinmom"),
+            # 모르는 이름은 무명
+            ({"product_persona": "없는사람"}, ""),
+            # 사람이 직접 쓴 대본
+            ({"product_persona": ""}, ""),
+            # 제품 대본이 아니라고 해 놓고 이름만 붙인 것은 믿지 않는다.
+            # 여기서 만든 대본이 아니라 확인할 길이 없다.
+            ({"product_persona": "kimbujang", "script_style": "informative"}, ""),
+            # 직접 쓴 프롬프트로 만든 대본에는 사람이 붙지 않는다
+            (
+                {"product_persona": "kimbujang", "custom_system_prompt": "내 프롬프트"},
+                "",
+            ),
         ]
         for named, recorded in cases:
-            with self.subTest(named=named):
-                params = self._params(video_script="넘겨받은 대본", product_persona=named)
+            with self.subTest(**named):
+                params = self._params(video_script="넘겨받은 대본", **named)
                 with patch.object(
                     persona.config, "app", {"product_persona": "kimbujang"}
                 ):

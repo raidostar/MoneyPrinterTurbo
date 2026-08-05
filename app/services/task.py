@@ -284,9 +284,17 @@ def generate_script(task_id, params):
         params.product_voice = ""
         # 화자는 다르다. 대본을 만들어 넘긴 쪽(화면, 봇)이 누구로 썼는지 함께
         # 알려 주면 그 대본은 그 사람이 쓴 것이고, 기록에 남아야 되짚을 수 있다.
-        # 아무도 안 넘겼으면 사람이 직접 쓴 대본이라 남길 것이 없다.
-        speaker = persona_service.resolve(params.product_persona)
-        params.product_persona = speaker.key if speaker else ""
+        #
+        # 다만 그 말을 그대로 믿지는 않는다. 여기서 만든 대본이 아니라 확인할
+        # 길이 없으므로, 적어도 제품 대본이라고 밝혔고 직접 쓴 프롬프트가 없을
+        # 때만 남긴다 — 그러지 않으면 아무 대본에나 이름을 붙여 보낼 수 있고,
+        # 기록은 쓰이지도 않은 사람을 가리키게 된다.
+        params.product_persona = persona_service.key_for(
+            params.script_style,
+            params.custom_system_prompt,
+            params.product_persona,
+            already_written=True,
+        )
 
     if not video_script:
         # 매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 고르지

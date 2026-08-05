@@ -159,16 +159,25 @@ def for_script(requested: str) -> Persona | None:
     return resolve(requested) if str(requested or "").strip() else configured()
 
 
-def key_for(script_style: str, custom_system_prompt: str, requested: str) -> str:
+def key_for(
+    script_style: str,
+    custom_system_prompt: str,
+    requested: str,
+    *,
+    already_written: bool = False,
+) -> str:
     """
     이번 대본에 실제로 쓰일 사람의 이름. 사람 없이 쓰면 빈 문자열.
 
     기록에 남길 값이 곧 이 값이다. 부르는 쪽마다 따로 판단하면 화면에서 만든
     대본에는 사람이 붙었는데 기록에는 안 남는 일이 생긴다 — 그러면 그 대본이
     어떻게 나왔는지 되짚을 수 없다.
+
+    ``already_written`` 은 대본이 이미 쓰인 뒤라는 뜻이다. 그때는 설정에 적힌
+    사람으로 채우지 않는다 — 쓸 때 쓰이지 않은 사람이 기록에만 남는다.
     """
     if script_style != "product" or str(custom_system_prompt or "").strip():
         # 제품 대본이 아니거나 직접 쓴 프롬프트가 있으면 사람은 붙지 않는다.
         return ""
-    speaker = for_script(requested)
+    speaker = resolve(requested) if already_written else for_script(requested)
     return speaker.key if speaker else ""
