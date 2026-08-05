@@ -266,8 +266,9 @@ max_queued_tasks = 100
 # the places the scenes come from, and the words that person would never use.
 #
 # The registry lives in app/services/persona.py. Leave this empty to write
-# without one — the register then comes from the opening style alone, which is
-# fine for one-off videos but drifts across a channel.
+# without one; a plain default register is used instead. That is fine for a
+# one-off video, but a channel wants a person — otherwise every video is spoken
+# by someone slightly different and nothing about it feels like one place.
 #
 # Available: haerinmom
 product_persona = "haerinmom"

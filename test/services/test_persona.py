@@ -108,6 +108,9 @@ class TestInThePrompt(unittest.TestCase):
 
         self.assertNotIn("## Who is speaking", prompt)
         self.assertIn(llm.PRODUCT_VOICES["confession"], prompt)
+        # 여는 방식은 어미를 정하지 않는다. 사람도 없으면 정한 곳이 아무 데도
+        # 없어져, 영상마다 존댓말과 반말이 섞인다.
+        self.assertIn(llm.NO_PERSONA_REGISTER, prompt)
 
     def test_the_speaker_comes_before_the_opening(self):
         """
@@ -126,6 +129,29 @@ class TestInThePrompt(unittest.TestCase):
             with self.subTest(style=style):
                 prompt = self._prompt(script_style=style, product_persona="haerinmom")
                 self.assertNotIn("## Who is speaking", prompt)
+
+    def test_a_speaker_replaces_the_default_register(self):
+        """
+        둘 다 들어가면 서로 다른 어미를 시킨다. 사람이 있으면 그 사람이 정한다.
+        """
+        with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
+            prompt = self._prompt(product_persona="haerinmom")
+
+        self.assertNotIn(llm.NO_PERSONA_REGISTER, prompt)
+        self.assertIn("~했어요", prompt)
+
+    def test_every_product_prompt_fixes_the_endings_somewhere(self):
+        """
+        어미를 정한 곳이 없으면 한 채널 안에서 말투가 흔들린다. 사람이 있든
+        없든 어느 한쪽에서는 정해져야 한다.
+        """
+        for configured in ("haerinmom", ""):
+            with self.subTest(configured=configured or "(없음)"):
+                with patch.object(
+                    persona.config, "app", {"product_persona": configured}
+                ):
+                    prompt = self._prompt(product_persona="")
+                self.assertRegex(prompt, r"~했어요|~했음")
 
     def test_the_configured_speaker_fills_an_empty_argument(self):
         """

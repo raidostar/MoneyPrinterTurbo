@@ -310,6 +310,19 @@ say the new way is better.
 """.strip(),
 }
 DEFAULT_PRODUCT_VOICE = "scene"
+
+# 사람을 정하지 않았을 때 쓰는 말투. 여는 방식은 어미를 정하지 않으므로, 이것이
+# 없으면 어느 쪽으로 쓸지 정한 곳이 아무 데도 없어져 영상마다 존댓말과 반말이
+# 섞인다. 채널을 운영할 것이라면 사람을 정하는 편이 낫고, 이것은 일회성 영상을
+# 위한 자리다.
+NO_PERSONA_REGISTER = """
+## How you talk
+
+You are one person telling someone what happened to you, not a brand. Blunt and
+unpolished, the way a note typed fast reads — in Korean ~했음, ~하더라, ~거임,
+~던듯 rather than ~했습니다. Every language has its own version of this; use that
+one, and keep it the same from the first line to the last.
+""".strip()
 # 예전 이름. 그때는 여는 방식과 말투를 한 덩어리로 묶어 두었고, 말투가 화자에게
 # 옮겨 가면서 이름이 바뀌었다. 기록에 남은 작업은 그대로 다시 돌아가야 하므로
 # 가장 가까운 여는 방식으로 이어 준다.
@@ -883,8 +896,11 @@ def build_script_prompt(
         # 화자를 먼저, 여는 방식을 나중에. 사람이 정해져 있으면 말투가 거기서
         # 나오고, 여는 방식은 그 사람이 매번 다르게 고르는 것이다.
         speaker = persona.for_script(product_persona)
-        if speaker is not None:
-            prompt += "\n\n" + speaker.as_prompt()
+        # 사람이 있으면 그 사람이 어미를 정하고, 없으면 기본 말투를 쓴다. 둘 다
+        # 없으면 정한 곳이 아무 데도 없어 영상마다 말투가 흔들린다.
+        prompt += "\n\n" + (
+            speaker.as_prompt() if speaker is not None else NO_PERSONA_REGISTER
+        )
         prompt += "\n\n" + PRODUCT_VOICES[resolve_product_voice(product_voice)]
     # 주제, 언어, 추가 요구사항은 사용자가 쓴 글이라 규칙처럼 읽힐 수 있다. 헤드라인
     # 쪽과 같은 방식으로 경계를 표시하고 꺾쇠를 이스케이프해, 재료 쪽에서 구분자를
