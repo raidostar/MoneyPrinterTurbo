@@ -280,10 +280,13 @@ def generate_script(task_id, params):
 
     video_script = params.video_script.strip()
     if video_script:
-        # 직접 쓴 대본에는 말투도 사람도 붙지 않는다. 요청값이 그대로 남으면, 쓰이지
-        # 않은 값이 기록에 남아 그 대본이 그렇게 쓰인 것처럼 보인다.
+        # 이미 대본이 있으면 여기서 만들지 않으므로 여는 방식은 쓰이지 않는다.
         params.product_voice = ""
-        params.product_persona = ""
+        # 화자는 다르다. 대본을 만들어 넘긴 쪽(화면, 봇)이 누구로 썼는지 함께
+        # 알려 주면 그 대본은 그 사람이 쓴 것이고, 기록에 남아야 되짚을 수 있다.
+        # 아무도 안 넘겼으면 사람이 직접 쓴 대본이라 남길 것이 없다.
+        speaker = persona_service.resolve(params.product_persona)
+        params.product_persona = speaker.key if speaker else ""
 
     if not video_script:
         # 매번 같은 말투로 쓰면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다. 고르지

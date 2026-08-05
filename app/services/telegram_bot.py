@@ -30,6 +30,7 @@ from app.services import (
     publish,
     task_artifacts,
 )
+from app.services import persona
 from app.services.sources import repo
 from app.services import task as tm
 from app.utils import utils
@@ -175,7 +176,7 @@ def _answer_callback(callback_id: str) -> None:
     _call("answerCallbackQuery", callback_query_id=callback_id)
 
 
-def _build_params(subject: str, script: str) -> VideoParams:
+def _build_params(subject: str, script: str, product_persona: str = "") -> VideoParams:
     """
     저장된 WebUI 설정 위에 대본만 얹는다.
 
@@ -207,6 +208,10 @@ def _build_params(subject: str, script: str) -> VideoParams:
         subtitle_below_color=str(
             saved.get("subtitle_below_color", "#111111") or "#111111"
         ),
+        # 대본을 여기서 만들어 넘기므로, 누구로 썼는지도 함께 보낸다. 안 보내면
+        # 기록에 아무도 안 남아 그 대본이 어떻게 나왔는지 되짚을 수 없다.
+        script_style="product" if product_persona else "informative",
+        product_persona=product_persona,
     )
 
 
@@ -223,6 +228,8 @@ class ShortsBot:
         self.candidates: dict[str, object] = {}
         # 올릴지 물어본 영상. 버튼을 누르면 여기서 찾는다.
         self.uploads: dict[str, tuple] = {}
+        # 누구로 쓸지 물어본 주제. 버튼을 누르면 여기서 찾는다.
+        self.subjects: dict[str, str] = {}
         # 기록 파일에 못 쓴 날을 위한 대비. 저장이 실패해도 이번 실행 동안에는
         # 같은 목록을 다시 보내지 않는다.
         self.offered_date = ""
@@ -428,8 +435,40 @@ class ShortsBot:
 
     # ---- 대본 ----
 
-    def _draft_script(self, subject: str) -> None:
-        _send(self.chat_id, "대본 쓰는 중…")
+    def _offer_persona(self, subject: str) -> None:
+        """
+        누구로 쓸지 물어본다. 고를 것이 하나뿐이면 묻지 않는다.
+
+        채널마다 말하는 사람이 다르고, 그 사람이 어디로 올라갈지도 정한다. 잘못
+        고르면 해린맘 영상이 골프 채널에 올라간다. 매번 눌러 고르게 두는 이유다.
+        """
+        names = sorted(persona.PERSONAS)
+        if len(names) <= 1:
+            self._draft_script(subject, names[0] if names else "")
+            return
+
+        token = uuid4().hex[:8]
+        self.subjects[token] = subject
+        _send(
+            self.chat_id,
+            f"{subject}\n누구로 쓸까요?",
+            buttons=[
+                [
+                    {
+                        "text": persona.PERSONAS[name].name,
+                        "callback_data": f"persona:{token}:{name}",
+                    }
+                    for name in names
+                ]
+            ],
+        )
+
+    def _draft_script(self, subject: str, product_persona: str = "") -> None:
+        speaker = persona.resolve(product_persona)
+        _send(
+            self.chat_id,
+            f"{speaker.name}으로 대본 쓰는 중…" if speaker else "대본 쓰는 중…",
+        )
         script = llm.generate_script(
             video_subject=subject,
             language=str(config.ui.get("video_language", "") or ""),
@@ -437,14 +476,15 @@ class ShortsBot:
             # 물건 이야기를 만든다. 경험담 스타일은 재미있는 사건은 잘 쓰지만
             # 물건을 다루지 않아, 미숫가루로 시켜도 미숫가루 이야기가 안 나온다.
             script_style="product",
+            product_persona=product_persona,
         )
         if not script or script.startswith("Error:"):
             _send(self.chat_id, "대본 생성에 실패했어요. 잠시 후 다시 해보세요.")
             return
 
-        self._offer_draft(subject, script)
+        self._offer_draft(subject, script, speaker.key if speaker else "")
 
-    def _offer_draft(self, subject: str, script: str) -> None:
+    def _offer_draft(self, subject: str, script: str, product_persona: str = "") -> None:
         """대본을 승인 대기에 올리고 버튼을 붙여 보낸다."""
         script = str(script or "").strip()[:MAX_SCRIPT_LENGTH]
         if not script:
@@ -453,7 +493,12 @@ class ShortsBot:
         # 어느 대본에 대한 버튼인지 표시해 둔다. 다시 뽑은 뒤 예전 메시지의 승인을
         # 누르면, 보고 있는 것과 다른 대본이 만들어진다.
         draft_id = uuid4().hex[:8]
-        self.pending = {"subject": subject, "script": script, "draft_id": draft_id}
+        self.pending = {
+            "subject": subject,
+            "script": script,
+            "draft_id": draft_id,
+            "product_persona": product_persona,
+        }
         _send(
             self.chat_id,
             f"{script}\n\n— {len(script)}자",
@@ -511,10 +556,10 @@ class ShortsBot:
 
     # ---- 렌더링 ----
 
-    def _render(self, subject: str, script: str) -> None:
+    def _render(self, subject: str, script: str, product_persona: str = "") -> None:
         task_id = utils.get_uuid()
         try:
-            params = _build_params(subject, script)
+            params = _build_params(subject, script, product_persona)
             result = tm.start(task_id=task_id, params=params, stop_at="video")
             videos = (result or {}).get("videos") or []
             if not videos:
@@ -546,6 +591,7 @@ class ShortsBot:
 
         subject = self.pending.get("subject", "")
         script = self.pending.get("script", "")
+        speaker = self.pending.get("product_persona", "")
         card_script = self.pending.get("card_script")
         item = self.pending.get("item")
         self.pending = {}
@@ -554,7 +600,7 @@ class ShortsBot:
         if card_script is not None:
             target, arguments = self._render_cards, (item, card_script)
         else:
-            target, arguments = self._render, (subject, script)
+            target, arguments = self._render, (subject, script, speaker)
         threading.Thread(target=target, args=arguments, daemon=True).start()
 
     # ---- 수신 ----
@@ -569,7 +615,7 @@ class ShortsBot:
             if not subject:
                 _send(self.chat_id, "주제를 함께 보내주세요. 예: /새영상 닭가슴살 맛있게 먹는 법")
                 return
-            self._draft_script(subject[:MAX_SUBJECT_LENGTH])
+            self._offer_persona(subject[:MAX_SUBJECT_LENGTH])
             return
 
         if text.startswith("/오늘") or text.startswith("/today"):
@@ -584,9 +630,15 @@ class ShortsBot:
             _send(self.chat_id, "쓸 수 있는 명령: /오늘, /새영상 <주제>, /상태")
             return
 
-        # 명령이 아닌 글은 대본을 직접 고쳐 보낸 것으로 본다.
+        # 명령이 아닌 글은 대본을 직접 고쳐 보낸 것으로 본다. 고친 것이지 새로 쓴
+        # 것이 아니므로 화자는 그대로 간다 — 여기서 지우면 손 한 번 댔다고 기록에서
+        # 사람이 사라진다.
         if self.pending:
-            self._offer_draft(self.pending.get("subject", ""), text)
+            self._offer_draft(
+                self.pending.get("subject", ""),
+                text,
+                self.pending.get("product_persona", ""),
+            )
 
     def _handle_callback(self, callback: dict) -> None:
         _answer_callback(str(callback.get("id", "")))
@@ -600,6 +652,18 @@ class ShortsBot:
                 _send(self.chat_id, "지난 목록의 버튼이에요. /오늘 로 다시 불러 주세요.")
                 return
             self._draft_cards(item)
+            return
+
+        if action == "persona":
+            # 한 번 고른 버튼은 쓴다. 남겨 두면 지난 주제로 또 만들게 된다.
+            token, _, name = draft_id.partition(":")
+            subject = self.subjects.pop(token, None)
+            if subject is None:
+                _send(self.chat_id, "지난 주제의 버튼이에요. /새영상 부터 다시 해주세요.")
+                return
+            threading.Thread(
+                target=self._draft_script, args=(subject, name), daemon=True
+            ).start()
             return
 
         if action == "publish":

@@ -61,9 +61,14 @@ class TestAccessControl(unittest.TestCase):
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
 
-        with patch.object(bot, "_send"), patch.object(
-            bot.llm, "generate_script", return_value="대본"
-        ) as generate:
+        # 사람이 여럿이면 누구로 쓸지 먼저 묻는다. 여기서 보려는 것은 그게 아니라
+        # 내 메시지가 통과하는지다.
+        only = {"haerinmom": bot.persona.PERSONAS["haerinmom"]}
+        with (
+            patch.dict(bot.persona.PERSONAS, only, clear=True),
+            patch.object(bot, "_send"),
+            patch.object(bot.llm, "generate_script", return_value="대본") as generate,
+        ):
             shorts.handle_update(_message(111, "/새영상 닭가슴살"))
 
         generate.assert_called_once()
@@ -96,9 +101,13 @@ class TestApprovalFlow(unittest.TestCase):
         shorts = bot.ShortsBot()
         shorts.chat_id = 111
 
-        with patch.object(bot, "_send"), patch.object(
-            bot.llm, "generate_script", return_value="대본"
-        ), patch.object(shorts, "_start_render") as render:
+        only = {"haerinmom": bot.persona.PERSONAS["haerinmom"]}
+        with (
+            patch.dict(bot.persona.PERSONAS, only, clear=True),
+            patch.object(bot, "_send"),
+            patch.object(bot.llm, "generate_script", return_value="대본"),
+            patch.object(shorts, "_start_render") as render,
+        ):
             shorts.handle_update(_message(111, "/새영상 닭가슴살"))
 
         render.assert_not_called()
@@ -1038,3 +1047,161 @@ class TestPublishing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPersonaPicker(unittest.TestCase):
+    """
+    채널마다 말하는 사람이 다르고, 그 사람이 어디로 올라갈지도 정한다. 잘못
+    고르면 해린맘 영상이 골프 채널에 올라간다.
+    """
+
+    def _bot(self):
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        return shorts
+
+    def _two_people(self):
+        return {
+            "haerinmom": bot.persona.PERSONAS["haerinmom"],
+            "kimbujang": bot.persona.PERSONAS["kimbujang"],
+        }
+
+    def test_it_asks_who_when_there_is_more_than_one(self):
+        shorts = self._bot()
+        with (
+            patch.dict(bot.persona.PERSONAS, self._two_people(), clear=True),
+            patch.object(shorts, "_draft_script") as draft,
+            patch.object(bot, "_send") as send,
+        ):
+            shorts.handle_update(_message(111, "/새영상 실리콘 주방집게"))
+
+        draft.assert_not_called()
+        said = str(send.call_args.kwargs["buttons"])
+        self.assertIn("해린맘", said)
+        self.assertIn("김부장", said)
+
+    def test_one_person_is_not_worth_asking_about(self):
+        """고를 것이 하나뿐인데 물어보면 누르는 일만 는다."""
+        shorts = self._bot()
+        only = {"haerinmom": bot.persona.PERSONAS["haerinmom"]}
+        with (
+            patch.dict(bot.persona.PERSONAS, only, clear=True),
+            patch.object(shorts, "_draft_script") as draft,
+            patch.object(bot, "_send"),
+        ):
+            shorts.handle_update(_message(111, "/새영상 실리콘 주방집게"))
+
+        draft.assert_called_once_with("실리콘 주방집게", "haerinmom")
+
+    def test_the_button_writes_as_the_person_it_names(self):
+        shorts = self._bot()
+        shorts.subjects = {"tok": "골프 거리측정기"}
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_draft_script") as draft,
+            patch.object(bot.threading, "Thread") as thread,
+        ):
+            thread.side_effect = lambda target, args, daemon: SimpleNamespace(
+                start=lambda: target(*args)
+            )
+            shorts.handle_update(_callback(111, "persona:tok:kimbujang"))
+
+        draft.assert_called_once_with("골프 거리측정기", "kimbujang")
+
+    def test_the_button_is_spent_when_used(self):
+        """남겨 두면 지난 주제로 또 만들게 된다."""
+        shorts = self._bot()
+        shorts.subjects = {"tok": "골프 거리측정기"}
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_draft_script"),
+            patch.object(bot.threading, "Thread"),
+        ):
+            shorts.handle_update(_callback(111, "persona:tok:kimbujang"))
+
+        self.assertEqual(shorts.subjects, {})
+
+    def test_a_stale_button_writes_nothing(self):
+        shorts = self._bot()
+        with (
+            patch.object(bot, "_answer_callback"),
+            patch.object(bot, "_send"),
+            patch.object(shorts, "_draft_script") as draft,
+        ):
+            shorts.handle_update(_callback(111, "persona:gone:kimbujang"))
+
+        draft.assert_not_called()
+
+    def test_the_chosen_person_reaches_the_script(self):
+        shorts = self._bot()
+        with (
+            patch.object(bot.llm, "generate_script", return_value="대본") as generate,
+            patch.object(bot, "_send"),
+        ):
+            shorts._draft_script("골프 거리측정기", "kimbujang")
+
+        self.assertEqual(generate.call_args.kwargs["product_persona"], "kimbujang")
+        self.assertEqual(generate.call_args.kwargs["script_style"], "product")
+
+    def test_the_chosen_person_survives_to_the_render(self):
+        """
+        대본을 여기서 만들어 넘기므로, 누구로 썼는지도 같이 가야 한다. 안 그러면
+        기록에 아무도 안 남아 그 대본이 어떻게 나왔는지 되짚을 수 없다.
+        """
+        shorts = self._bot()
+        with patch.object(bot, "_send"):
+            shorts._offer_draft("골프 거리측정기", "대본", "kimbujang")
+
+        self.assertEqual(shorts.pending["product_persona"], "kimbujang")
+
+        with (
+            patch.object(bot.threading, "Thread") as thread,
+            patch.object(bot, "_send"),
+        ):
+            captured = {}
+            thread.side_effect = lambda target, args, daemon: SimpleNamespace(
+                start=lambda: captured.update(args=args)
+            )
+            shorts._start_render()
+
+        self.assertEqual(captured["args"], ("골프 거리측정기", "대본", "kimbujang"))
+
+    def test_the_chosen_person_reaches_the_draft(self):
+        """대본을 만들 때만 쓰고 넘기지 않으면, 그다음 단계부터 아무도 없다."""
+        shorts = self._bot()
+        with (
+            patch.object(bot.llm, "generate_script", return_value="대본"),
+            patch.object(bot, "_send"),
+        ):
+            shorts._draft_script("골프 거리측정기", "kimbujang")
+
+        self.assertEqual(shorts.pending["product_persona"], "kimbujang")
+
+    def test_an_edited_script_keeps_the_person(self):
+        """
+        보여 준 대본을 손봐서 다시 보낸 것이지 새로 쓴 것이 아니다. 여기서 화자를
+        지우면 오타 하나 고쳤다고 기록에서 사람이 사라진다.
+        """
+        shorts = self._bot()
+        with patch.object(bot, "_send"):
+            shorts._offer_draft("골프 거리측정기", "대본", "kimbujang")
+            shorts._handle_message({"text": "대본을 조금 고쳤다"})
+
+        self.assertEqual(shorts.pending["script"], "대본을 조금 고쳤다")
+        self.assertEqual(shorts.pending["product_persona"], "kimbujang")
+
+    def test_the_params_carry_the_person(self):
+        params = bot._build_params("골프 거리측정기", "대본", "kimbujang")
+
+        self.assertEqual(params.product_persona, "kimbujang")
+        self.assertEqual(params.script_style, "product")
+
+    def test_a_script_with_nobody_is_not_a_product_script(self):
+        """
+        사람이 없으면 제품 대본이 아니다. 스타일만 붙여 두면 기록이 사실과 달라진다.
+        """
+        params = bot._build_params("주제", "직접 쓴 대본", "")
+        self.assertEqual(params.product_persona, "")
+        self.assertNotEqual(params.script_style, "product")
