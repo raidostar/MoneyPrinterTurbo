@@ -310,11 +310,20 @@ say the new way is better.
 """.strip(),
 }
 DEFAULT_PRODUCT_VOICE = "scene"
+# 예전 이름. 그때는 여는 방식과 말투를 한 덩어리로 묶어 두었고, 말투가 화자에게
+# 옮겨 가면서 이름이 바뀌었다. 기록에 남은 작업은 그대로 다시 돌아가야 하므로
+# 가장 가까운 여는 방식으로 이어 준다.
+LEGACY_PRODUCT_VOICES = {
+    "community": "scene",
+    "friend": "scene",
+    "diary": "days",
+}
 
 
 def resolve_product_voice(name: str) -> str:
     """쓸 수 있는 말투 이름으로 맞춘다. 모르는 이름이면 기본값."""
     key = str(name or "").strip().lower()
+    key = LEGACY_PRODUCT_VOICES.get(key, key)
     if key in PRODUCT_VOICES:
         return key
     if key:

@@ -681,3 +681,32 @@ class TestClosingLine(unittest.TestCase):
         korean_note = prompt.split("Writing in Korean:", 1)
         self.assertEqual(len(korean_note), 2)
         self.assertIn("자리값", korean_note[1])
+
+
+class TestOldVoiceNames(unittest.TestCase):
+    """
+    여는 방식의 이름이 바뀌었다. 기록에 남은 작업은 그대로 다시 돌아가야 하므로,
+    옛 이름이 조용히 기본값으로 떨어지면 안 된다 — 그러면 같은 기록으로 다시
+    만든 영상이 다른 대본이 된다.
+    """
+
+    def test_an_old_name_still_resolves(self):
+        for old, expected in llm.LEGACY_PRODUCT_VOICES.items():
+            with self.subTest(old=old):
+                self.assertEqual(llm.resolve_product_voice(old), expected)
+                self.assertIn(expected, llm.PRODUCT_VOICES)
+
+    def test_an_old_name_does_not_fall_back_to_the_default(self):
+        """기본값으로 떨어지면 바뀐 것을 눈치챌 방법이 없다."""
+        self.assertNotEqual(
+            llm.resolve_product_voice("diary"), llm.DEFAULT_PRODUCT_VOICE
+        )
+
+    def test_a_name_that_never_existed_still_falls_back(self):
+        self.assertEqual(
+            llm.resolve_product_voice("없던이름"), llm.DEFAULT_PRODUCT_VOICE
+        )
+
+    def test_no_old_name_shadows_a_current_one(self):
+        """겹치면 지금 이름이 옛 이름으로 덮인다."""
+        self.assertFalse(set(llm.LEGACY_PRODUCT_VOICES) & set(llm.PRODUCT_VOICES))
