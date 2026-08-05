@@ -1219,18 +1219,21 @@ class TestPersonaPicker(unittest.TestCase):
     def test_the_voice_follows_the_person(self):
         """
         화면에 저장된 목소리 하나를 그대로 쓰면 해린맘 대본을 남자 목소리가 읽는다.
+        사람이 없을 때까지 덮어쓰면 반대로 화면에서 맞춰 둔 값이 무시된다.
         """
-        with patch.object(bot.config, "ui", {"voice_name": "ko-KR-InJoonNeural-Male"}):
-            params = bot._build_params("실리콘 주방집게", "대본", "haerinmom")
+        saved = "ko-KR-HyunsuMultilingualNeural-Male"
+        cases = [
+            ("haerinmom", bot.persona.PERSONAS["haerinmom"].voice),
+            ("kimbujang", bot.persona.PERSONAS["kimbujang"].voice),
+            ("없는사람", saved),
+            ("", saved),
+        ]
+        for named, expected in cases:
+            with self.subTest(persona=named):
+                with patch.object(bot.config, "ui", {"voice_name": saved}):
+                    params = bot._build_params("실리콘 주방집게", "대본", named)
 
-        self.assertEqual(params.voice_name, bot.persona.PERSONAS["haerinmom"].voice)
-
-    def test_a_script_with_nobody_keeps_the_saved_voice(self):
-        """사람이 없으면 화면에서 맞춰 둔 값을 그대로 쓴다."""
-        with patch.object(bot.config, "ui", {"voice_name": "ko-KR-InJoonNeural-Male"}):
-            params = bot._build_params("주제", "직접 쓴 대본", "")
-
-        self.assertEqual(params.voice_name, "ko-KR-InJoonNeural-Male")
+                self.assertEqual(params.voice_name, expected)
 
     def test_the_params_carry_the_person(self):
         params = bot._build_params("골프 거리측정기", "대본", "kimbujang")
