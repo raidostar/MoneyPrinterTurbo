@@ -887,6 +887,44 @@ class TestEveryEntryPointGetsVariety(unittest.TestCase):
         self.assertEqual(seen["endings"], set())
 
 
+class TestTheThingHasToFixIt(unittest.TestCase):
+    """
+    문제 하나를 말해 놓고 다른 자리에서 좋아졌다고 끝낸 대본이 나왔다. 발리 물이
+    세서 고생했다더니, 집에 돌아와서 필터를 꽂았다. 그 문제를 보고 들어온 사람은
+    답을 못 받고, 살 이유도 안 생긴다.
+    """
+
+    def _prompt(self):
+        return " ".join(llm.script_style_prompt("product").split())
+
+    def test_the_thing_fixes_the_trouble_that_was_told(self):
+        said = self._prompt()
+        self.assertIn("has to fix the trouble you just described", said)
+
+    def test_it_fixes_it_in_the_same_place(self):
+        """
+        같은 이야기 안이어도 자리가 다르면 소용없다 — 호텔에서 겪은 일을 집에서
+        푸는 식이다.
+        """
+        said = self._prompt()
+        self.assertIn("in the place where you described it", said)
+
+    def test_why_it_matters_is_stated(self):
+        """
+        왜 안 되는지가 없으면 규칙 하나가 더 늘어난 것으로만 읽히고, 다른 규칙과
+        부딪힐 때 먼저 버려진다.
+        """
+        said = self._prompt()
+        self.assertIn("nothing to buy the thing for", said)
+
+    def test_the_way_out_is_a_different_trouble(self):
+        """
+        안 풀었으면 푼 척하는 대신 다른 이야기를 하라고 해야, 지어내지 않는다.
+        """
+        said = self._prompt()
+        self.assertIn("tell a different trouble", said)
+
+
 class TestOneStretchOfTime(unittest.TestCase):
     """
     한 대본에 시점이 여럿 섞이면 언제 있었던 일인지 알 수 없다. 실제로 파리에서
