@@ -87,6 +87,11 @@ LLM_PROVIDER_REGISTRY = (
         "claude_cli",
         "Claude Code CLI (구독)",
         adapter="cli",
+        # 정하지 않으면 이 도구는 제일 큰 모델로 답한다. 쇼츠 대본 한 편에 그것까지
+        # 쓸 이유가 없고, 그만큼 구독 사용량이 빨리 준다. 반대로 더 작은 모델은 이
+        # 프롬프트를 다 지키지 못했다 — 한 대본 안에서 여행을 두 번 가고, 쓰지
+        # 말라고 적어 둔 말이 그대로 나왔다.
+        default_model="sonnet",
         requires_api_key=False,
         requires_model_name=False,
         requires_base_url=False,

@@ -184,6 +184,50 @@ class TestHowItIsCalled(unittest.TestCase):
         self.assertEqual(command[command.index("--model") + 1], "claude-opus-5")
 
 
+class TestWhichModelAnswers(unittest.TestCase):
+    """
+    정하지 않으면 이 도구는 제일 큰 모델로 답한다. 쇼츠 대본 한 편에 그것까지 쓸
+    이유가 없고, 그만큼 구독 사용량이 빨리 준다.
+    """
+
+    def _spec(self):
+        from app.models.llm_provider import get_llm_provider
+
+        return get_llm_provider("claude_cli")
+
+    def test_a_model_is_always_chosen(self):
+        """비워 두면 도구의 기본값이 쓰인다 — 그 값은 우리가 고른 것이 아니다."""
+        self.assertTrue(self._spec().resolve_model_name(""))
+
+    def test_the_biggest_model_is_not_the_default(self):
+        self.assertNotIn("opus", self._spec().resolve_model_name(""))
+
+    def test_the_smallest_model_is_not_the_default(self):
+        """
+        더 작은 모델은 이 프롬프트를 다 지키지 못했다. 한 대본 안에서 여행을 두 번
+        가고, 쓰지 말라고 적어 둔 말이 그대로 나왔다.
+        """
+        self.assertNotIn("haiku", self._spec().resolve_model_name(""))
+
+    def test_what_is_configured_wins(self):
+        self.assertEqual(self._spec().resolve_model_name("opus"), "opus")
+
+    def test_the_chosen_model_reaches_the_tool(self):
+        """고르기만 하고 안 넘기면 도구의 기본값으로 돈다."""
+        from app.config import config
+        from app.services import llm
+
+        with patch.dict(config.app, {"llm_provider": "claude_cli"}):
+            with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
+                llm._generate_response("프롬프트")
+
+        command = ran.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--model") + 1],
+            self._spec().resolve_model_name(""),
+        )
+
+
 class TestReadingTheAnswer(unittest.TestCase):
     def test_the_answer_comes_back_trimmed(self):
         with patch.object(subprocess, "Popen", side_effect=_answers("  대본  \n")):
