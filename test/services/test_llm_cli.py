@@ -111,7 +111,7 @@ class TestReadingTheAnswer(unittest.TestCase):
         with patch.object(
             subprocess,
             "run",
-            return_value=_done(stdout="가" * (llm_cli.MAX_OUTPUT_BYTES + 1)),
+            return_value=_done(stdout="가" * (llm_cli.MAX_OUTPUT_CHARS + 1)),
         ):
             with self.assertRaises(ValueError):
                 llm_cli.claude("프롬프트")
@@ -136,15 +136,22 @@ class TestWhenItGoesWrong(unittest.TestCase):
         """
         오류 문구에는 경로와 설정이 섞여 있고, 그 문구는 사용자에게 그대로 보인다.
         """
-        secret = "/Users/kh/.config/openai/auth.json"
+        secret = "/Users/kh/.config/openai/auth.json token=sk-abcdef0123456789"
         with patch.object(
             subprocess, "run", return_value=_done(returncode=1, stderr=secret)
         ):
-            with patch.object(llm_cli.logger, "warning"):
+            with patch.object(llm_cli.logger, "warning") as warned:
                 with self.assertRaises(ValueError) as caught:
                     llm_cli.claude("프롬프트")
 
         self.assertNotIn(secret, str(caught.exception))
+        # 로그도 마찬가지다. 나중에 통째로 공유되는 자리다.
+        said = " ".join(str(call.args[0]) for call in warned.call_args_list)
+        self.assertNotIn(secret, said)
+        self.assertNotIn("sk-abcdef0123456789", said)
+        # 무엇이 일어났는지는 여전히 알 수 있어야 한다.
+        self.assertIn("claude", said)
+        self.assertIn("1", said)
 
     def test_an_unknown_name_runs_nothing(self):
         """

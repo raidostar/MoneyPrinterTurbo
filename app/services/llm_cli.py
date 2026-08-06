@@ -21,8 +21,9 @@ from loguru import logger
 
 # 한 번 부를 때 기다릴 시간. Claude 는 프롬프트 하나에 일 분을 넘기기도 한다.
 TIMEOUT_SECONDS = 300
-# 받아들일 최대 응답 크기. 대본은 수백 자다. 이보다 크면 응답이 아니라 다른 무엇이다.
-MAX_OUTPUT_BYTES = 256 * 1024
+# 받아들일 최대 응답 길이(글자). 대본은 수백 자다. 이보다 길면 응답이 아니라
+# 다른 무엇이다.
+MAX_OUTPUT_CHARS = 256 * 1024
 
 
 def _run(command: list[str], prompt: str, read_from: str = "") -> str:
@@ -49,23 +50,21 @@ def _run(command: list[str], prompt: str, read_from: str = "") -> str:
         raise ValueError(f"{command[0]} did not answer in time") from None
 
     if result.returncode != 0:
-        # 도구가 뱉은 말을 그대로 올리지 않는다. 경로와 설정이 섞여 있고, 그 문구는
-        # 사용자에게 그대로 보인다.
-        logger.warning(
-            f"{command[0]} exited with {result.returncode}: "
-            f"{(result.stderr or '').strip()[:200]}"
-        )
+        # 도구가 뱉은 말은 어디에도 옮기지 않는다 — 사용자 화면에도, 로그에도.
+        # 인증 토큰과 설정 경로가 섞여 나오고, 로그는 나중에 통째로 공유된다.
+        # 무엇이 일어났는지 짚는 데는 이름과 종료 코드로 충분하다.
+        logger.warning(f"{command[0]} exited with {result.returncode}")
         raise ValueError(f"{command[0]} failed")
 
     answer = result.stdout
     if read_from:
         try:
             with open(read_from, encoding="utf-8") as handle:
-                answer = handle.read(MAX_OUTPUT_BYTES + 1)
+                answer = handle.read(MAX_OUTPUT_CHARS + 1)
         except OSError:
             raise ValueError(f"{command[0]} wrote no answer") from None
 
-    if len(answer) > MAX_OUTPUT_BYTES:
+    if len(answer) > MAX_OUTPUT_CHARS:
         raise ValueError(f"{command[0]} answered with too much text")
     return answer.strip()
 
