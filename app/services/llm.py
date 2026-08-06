@@ -193,6 +193,12 @@ Four beats. The proportions matter more than the wording.
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
 
+   The thing has to fix the trouble you just described, in the place where you
+   described it. If the water was hard in the hotel, the filter goes on the hotel
+   shower — not on the one at home after the trip. A viewer who came for that
+   problem gets no answer otherwise, and there is nothing to buy the thing for.
+   If it did not solve that trouble, tell a different trouble.
+
    This is one stretch of time, told in the order it happened, and all of it has
    already happened. The trouble and the fix belong to the same story: the same
    trip, the same week, the same flat. Time may move forward inside it — the
