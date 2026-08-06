@@ -981,61 +981,21 @@ class TestTheScriptIsNotAnAnnouncement(unittest.TestCase):
     """
     무엇을 쓸지 밝히고 시작하는 줄이 붙어 올 때가 있다. 그대로 두면 영상이
     "해린맘 목소리로 스크립트를 써볼게요" 를 읽는다.
+
+    받아 놓고 지우지는 않는다. 앞머리처럼 보이는 것과 진짜 첫 문단을 글자만 보고
+    가를 수 없어서다 — "이 영상에서는 좋은 대본 쓰는 법을 알려드릴게요" 는 지우면
+    안 되는 첫 문단이다. 잘못 지우면 첫 장면이 조용히 사라지는데, 붙어 나온 앞머리는
+    승인 화면에서 눈에 보이고 다시 뽑으면 된다.
     """
 
-    def test_the_announcing_line_is_dropped(self):
-        cases = [
-            ["해린맘 목소리로 아기 욕조 정수 필터 스크립트를 써볼게요.", "진짜 대본이에요."],
-            ["요청하신 대본을 작성해 드릴게요.", "진짜 대본이에요."],
-            ["Here is the script you asked for.", "The real script."],
-        ]
-        for paragraphs in cases:
-            with self.subTest(first=paragraphs[0][:20]):
-                self.assertEqual(llm._without_preamble(paragraphs), paragraphs[1:])
+    def test_the_script_is_told_not_to_introduce_itself(self):
+        said = " ".join(llm.script_style_prompt("product").split())
 
-    def test_a_script_that_merely_mentions_scripts_is_kept(self):
-        """
-        대본 쓰는 사람한테 파는 물건이면 진짜 대본에도 그 말이 나온다. 지우면
-        영상에서 첫 장면이 통째로 사라진다.
-        """
-        cases = [
-            ["대본 쓰는 사람한테 이 마이크가 좋더라구요. 어제 알았어요.", "둘째 문단"],
-            ["어제 대본을 다 날렸어요.", "복구했어요."],
-        ]
-        for paragraphs in cases:
-            with self.subTest(first=paragraphs[0][:20]):
-                self.assertEqual(llm._without_preamble(paragraphs), paragraphs)
+        self.assertIn("your first line is already the script", said)
+        self.assertIn("never say what you are about to write", said)
 
-    def test_a_single_paragraph_is_never_dropped(self):
-        """
-        한 덩어리로 왔으면 그것이 대본이다. 잘못 보고 지우면 영상에 아무 소리도
-        안 남는다.
-        """
-        only = ["해린맘 목소리로 스크립트를 써볼게요."]
-        self.assertEqual(llm._without_preamble(only), only)
+    def test_the_reason_is_stated(self):
+        """왜 안 되는지가 없으면 규칙 하나가 더 늘어난 것으로만 읽힌다."""
+        said = " ".join(llm.script_style_prompt("product").split())
 
-    def test_a_long_first_paragraph_is_kept(self):
-        """
-        앞머리는 짧은 한 줄이다. 길면 대본의 일부로 본다 — 말투만 보고 지우면
-        긴 첫 문단이 통째로 날아간다.
-        """
-        long_first = [
-            "그날 아침에 있었던 일을 대본으로 옮기면 대충 이런 이야기가 되는데, "
-            "끝까지 듣고 나면 제가 왜 그랬는지 아시겠습니다",
-            "둘째",
-        ]
-        self.assertGreater(len(long_first[0]), llm.MAX_PREAMBLE_LENGTH)
-        self.assertEqual(llm._without_preamble(long_first), long_first)
-
-    def test_the_announcing_line_never_reaches_the_script(self):
-        """
-        떼는 함수를 따로 두기만 하고 안 부르면, 영상은 그대로 그 줄을 읽는다.
-        """
-        answer = "해린맘 목소리로 스크립트를 써볼게요.\n\n해린이 목욕물 받아놓고 코를 막더라구요."
-        with patch.object(llm, "_generate_response", return_value=answer):
-            script = llm.generate_script(
-                video_subject="아기 욕조 정수 필터", script_style="product"
-            )
-
-        self.assertNotIn("써볼게요", script)
-        self.assertIn("코를 막더라구요", script)
+        self.assertIn("read aloud in the video", said)
