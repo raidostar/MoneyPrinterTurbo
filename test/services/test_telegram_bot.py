@@ -1054,6 +1054,97 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestWhatTheBotSays(unittest.TestCase):
+    def test_the_particle_matches_the_name(self):
+        """
+        "박대리으로" 는 그 문장만 기계가 쓴 것처럼 읽힌다. 하루에 몇 번씩 보내는
+        문장이다.
+        """
+        cases = [
+            ("해린맘", "해린맘으로"),
+            ("김부장", "김부장으로"),
+            ("수민", "수민으로"),
+            # 받침이 없거나 ㄹ 이면 "로"
+            ("박대리", "박대리로"),
+            ("철수", "철수로"),
+            ("민철", "민철로"),
+        ]
+        for name, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(bot._as(name), expected)
+
+    def test_every_registered_person_gets_the_right_particle(self):
+        for speaker in bot.persona.PERSONAS.values():
+            with self.subTest(persona=speaker.key):
+                self.assertTrue(bot._as(speaker.name).endswith("로"))
+                self.assertFalse(bot._as(speaker.name).endswith("리으로"))
+
+    def test_a_name_that_is_not_hangul_does_not_crash(self):
+        for name in ("", "Kim", "42"):
+            with self.subTest(name=name):
+                self.assertIn(bot._as(name), (f"{name}으로",))
+
+    def test_running_out_of_credits_says_so(self):
+        """
+        기다리라고만 하면 사람은 계속 다시 눌러 본다. 크레딧은 기다려도 안 찬다.
+        """
+        said = bot._why_it_failed(
+            "Error: Error code: 429 - {'error': {'code': 'credit_balance_exhausted',"
+            " 'type': 'insufficient_quota'}}"
+        )
+
+        self.assertIn("크레딧", said)
+        self.assertIn("billing", said)
+        self.assertNotIn("잠시 후", said)
+
+    def test_being_rate_limited_says_how_long(self):
+        """
+        "잠시 후" 는 얼마인지 알 수 없어 계속 눌러 보게 된다. 몰린 것은 곧 풀린다.
+        """
+        said = bot._why_it_failed("Error: rate_limit_exceeded")
+
+        self.assertIn("몰렸", said)
+        self.assertIn("일 분", said)
+        self.assertNotIn("크레딧", said)
+
+    def test_anything_else_keeps_the_plain_message(self):
+        for script in ("Error: connection refused", "", None):
+            with self.subTest(script=script):
+                self.assertIn("실패", bot._why_it_failed(script))
+
+    def test_the_person_is_named_the_way_it_is_said(self):
+        """조사를 붙인 문장이 그대로 나가야 고친 의미가 있다."""
+        shorts = bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(bot.llm, "generate_script", return_value="대본"),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._draft_script("주제", "parkdaeri")
+
+        said = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("박대리로 대본 쓰는 중", said)
+        self.assertNotIn("박대리으로", said)
+
+    def test_the_reason_reaches_the_chat(self):
+        """이유를 알아내 놓고 안 보내면 아무것도 안 한 것과 같다."""
+        shorts = self._bot() if hasattr(self, "_bot") else bot.ShortsBot()
+        shorts.chat_id = 111
+        with (
+            patch.object(
+                bot.llm,
+                "generate_script",
+                return_value="Error: insufficient_quota",
+            ),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts._draft_script("주제", "haerinmom")
+
+        said = " ".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("크레딧", said)
+        self.assertEqual(shorts.pending, {})
+
+
 class TestPersonaPicker(unittest.TestCase):
     """
     채널마다 말하는 사람이 다르고, 그 사람이 어디로 올라갈지도 정한다. 잘못

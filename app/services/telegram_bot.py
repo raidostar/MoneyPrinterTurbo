@@ -179,6 +179,41 @@ def _answer_callback(callback_id: str) -> None:
     _call("answerCallbackQuery", callback_query_id=callback_id)
 
 
+def _as(name: str) -> str:
+    """
+    "해린맘으로", "박대리로". 받침이 있으면 으로, 없으면 로.
+
+    한 글자 차이지만 사람 이름에 붙는 조사가 틀리면 그 문장만 기계가 쓴 것처럼
+    읽힌다. 이 봇이 하루에 몇 번씩 보내는 문장이다.
+    """
+    last = (name or "")[-1:]
+    if not ("가" <= last <= "힣"):
+        return f"{name}으로"
+    # 한글 음절은 초성/중성/종성 순서로 배열돼 있어서, 종성 유무는 나머지로 안다.
+    # ㄹ 받침도 "로" 를 붙인다 — 서울로지 서울으로가 아니다.
+    final = (ord(last) - 0xAC00) % 28
+    return f"{name}로" if final in (0, 8) else f"{name}으로"
+
+
+def _why_it_failed(script: str) -> str:
+    """
+    대본을 못 만든 이유를 사람 말로. 무엇을 해야 하는지가 달라진다.
+
+    한 문장으로 뭉뚱그리면 기다리라고만 하게 되는데, 크레딧이 떨어진 것은 기다려도
+    안 풀린다. 그 사이 사람은 계속 다시 눌러 본다.
+    """
+    said = str(script or "")
+    if "insufficient_quota" in said or "credit" in said.lower():
+        return (
+            "대본을 못 만들었어요. OpenAI 크레딧이 떨어졌어요.\n"
+            "https://platform.openai.com/settings/organization/billing 에서 충전하면 "
+            "바로 됩니다."
+        )
+    if "rate_limit" in said or "429" in said:
+        return "요청이 몰렸어요. 일 분쯤 뒤에 다시 해주세요."
+    return "대본 생성에 실패했어요. 잠시 후 다시 해보세요."
+
+
 def _build_params(subject: str, script: str, product_persona: str = "") -> VideoParams:
     """
     저장된 WebUI 설정 위에 대본만 얹는다.
@@ -479,7 +514,7 @@ class ShortsBot:
         speaker = persona.resolve(product_persona)
         _send(
             self.chat_id,
-            f"{speaker.name}으로 대본 쓰는 중…" if speaker else "대본 쓰는 중…",
+            f"{_as(speaker.name)} 대본 쓰는 중…" if speaker else "대본 쓰는 중…",
         )
         script = llm.generate_script(
             video_subject=subject,
@@ -491,7 +526,7 @@ class ShortsBot:
             product_persona=product_persona,
         )
         if not script or script.startswith("Error:"):
-            _send(self.chat_id, "대본 생성에 실패했어요. 잠시 후 다시 해보세요.")
+            _send(self.chat_id, _why_it_failed(script))
             return
 
         self._offer_draft(subject, script, speaker.key if speaker else "")
