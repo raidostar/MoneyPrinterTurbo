@@ -11,7 +11,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 
 from app.config import config
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
-from app.services import material_cache, task_artifacts
+from app.services import material_cache, opening, task_artifacts
 from app.utils import utils
 
 # Thread-safe counter for API key rotation
@@ -770,6 +770,39 @@ def _search_videos_with_cache(
         return items
 
 
+def _opening_first(
+    video_paths: List[str],
+    material_sources: list[dict[str, Any]],
+    opening_line: str,
+) -> List[str]:
+    """
+    첫 문장에 맞는 클립을 맨 앞으로 옮긴다. 고르지 못하면 받은 순서 그대로.
+
+    쇼츠는 피드에서 이미 재생된 채로 뜨고, 시청자는 첫 한두 초에 넘길지를 정한다.
+    검색어를 순서대로 맞춰도 이 자리는 해결되지 않는다 — 검색어가 맞아도 받아 온
+    것이 다를 수 있어서다.
+    """
+    if not opening_line or len(video_paths) < 2:
+        return video_paths
+
+    from app.services import llm
+
+    chosen = opening.pick(opening_line, material_sources, llm._generate_response)
+    if not chosen:
+        return video_paths
+
+    for index, path in enumerate(video_paths):
+        if Path(path).name == chosen:
+            if index:
+                video_paths.insert(0, video_paths.pop(index))
+            return video_paths
+
+    # 고른 이름이 받은 파일에 없다. 기록과 파일이 어긋난 것이므로 순서를 건드리지
+    # 않고 남긴다 — 조용히 넘어가면 다음에 같은 일이 나도 알 수 없다.
+    logger.warning("the chosen opening clip is not among the downloaded files")
+    return video_paths
+
+
 def download_videos(
     task_id: str,
     search_terms: List[str],
@@ -779,6 +812,7 @@ def download_videos(
     audio_duration: float = 0.0,
     max_clip_duration: int = 5,
     match_script_order: bool = False,
+    opening_line: str = "",
 ) -> List[str]:
     provider = "pexels"
     remote_search_videos = search_videos_pexels
@@ -809,7 +843,7 @@ def download_videos(
         material_directory = ""
 
     if match_script_order:
-        return _download_videos_by_script_order(
+        ordered, ordered_sources = _download_videos_by_script_order(
             task_id=task_id,
             search_terms=search_terms,
             search_videos=search_videos,
@@ -818,6 +852,7 @@ def download_videos(
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
         )
+        return _opening_first(ordered, ordered_sources, opening_line)
 
     valid_video_items = []
     valid_video_urls = []
@@ -888,7 +923,7 @@ def download_videos(
             )
     logger.success(f"downloaded {len(video_paths)} videos")
     _persist_material_sources(task_id, material_sources)
-    return video_paths
+    return _opening_first(video_paths, material_sources, opening_line)
 
 
 def _download_videos_by_script_order(
@@ -899,7 +934,7 @@ def _download_videos_by_script_order(
     audio_duration: float,
     max_clip_duration: int,
     material_directory: str,
-) -> List[str]:
+) -> tuple[List[str], list[dict[str, Any]]]:
     """
     대본 순서에 맞춰 소재를 내려받는다.
 
@@ -995,7 +1030,7 @@ def _download_videos_by_script_order(
 
     logger.success(f"downloaded {len(video_paths)} ordered videos")
     _persist_material_sources(task_id, material_sources)
-    return video_paths
+    return video_paths, material_sources
 
 
 if __name__ == "__main__":
