@@ -1774,12 +1774,15 @@ def split_for_one_line(line: str, limit: int = MAX_SUBTITLE_LINE_LENGTH) -> list
     spaces = [i for i, char in enumerate(line) if char == " "]
     middle = len(line) / 2
 
-    def _cost(cut: int) -> float:
-        # 가운데에 가까울수록 좋다. 앞 낱말이 조사나 연결어미로 끝나면 거기가
-        # 말이 끊기는 자리라, 조금 치우쳐도 그쪽을 택한다.
+    def _cost(cut: int) -> tuple[int, float]:
+        # 말이 끊기는 자리가 먼저다. 가운데에 가까운 것은 그다음이다.
+        #
+        # 예전에는 둘을 더해서 견줬는데, 가운데를 조금 벗어난 조사 자리가 한복판의
+        # 아무 자리에게 졌다. "집에 돌아와서 / 샤워기 필터 꽂고 씻었는데" 로 끊길
+        # 것이 "집에 돌아와서 샤워기 / 필터 꽂고 씻었는데" 가 되어, 한 낱말이
+        # 둘로 갈라졌다.
         head = line[:cut].rstrip()
-        bonus = len(line) * 0.15 if head.endswith(BREAK_ENDINGS) else 0
-        return abs(cut - middle) - bonus
+        return (0 if head.endswith(BREAK_ENDINGS) else 1, abs(cut - middle))
 
     for cut in sorted(spaces, key=_cost):
         head, tail = line[:cut].strip(), line[cut + 1 :].strip()

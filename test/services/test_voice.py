@@ -1258,6 +1258,55 @@ class TestSubtitleLineBreaks(unittest.TestCase):
                 self.assertLess(max(_display_width(head), _display_width(tail)),
                                 min(_display_width(head), _display_width(tail)) * 3)
 
+    def test_a_phrase_boundary_beats_the_middle(self):
+        """
+        말이 끊기는 자리와 가운데를 더해서 견주면, 가운데를 조금 벗어난 조사 자리가
+        한복판의 아무 자리에게 진다. 그러면 한 낱말이 둘로 갈라진다.
+        """
+        from app.services.voice import split_for_one_line
+
+        self.assertEqual(
+            split_for_one_line("집에 돌아와서 샤워기 필터 꽂고 씻었는데"),
+            ["집에 돌아와서", "샤워기 필터 꽂고 씻었는데"],
+        )
+
+    def test_among_the_pause_points_the_balanced_one_wins(self):
+        """
+        말이 끊기는 자리가 여럿이면 그중 고른 쪽을 잡아야 한다. 앞에서부터 집으면
+        한쪽이 짧고 다른 쪽이 길어져, 나누기 전과 다를 바 없이 읽힌다.
+        """
+        from app.services.voice import split_for_one_line
+
+        self.assertEqual(
+            split_for_one_line("아침에 해린이 데려다주고 앞유리에 바로 펼쳐뒀어요"),
+            ["아침에 해린이 데려다주고", "앞유리에 바로 펼쳐뒀어요"],
+        )
+        self.assertEqual(
+            split_for_one_line("그날 저녁에 감고 나오니까 빗이 한 번에 내려가더라"),
+            ["그날 저녁에 감고 나오니까", "빗이 한 번에 내려가더라"],
+        )
+
+    def test_a_word_is_not_cut_in_two(self):
+        """
+        "샤워기 / 필터" 처럼 한 물건의 이름이 갈리면, 읽는 사람이 두 줄을 붙여
+        읽어야 뜻이 선다.
+        """
+        from app.services.voice import BREAK_ENDINGS, split_for_one_line
+
+        for line in (
+            "집에 돌아와서 샤워기 필터 꽂고 씻었는데",
+            "다음 날 아침에 여행용 샤워기 필터를 달았어요",
+            "어린이집 가방에 물티슈 캡 넣어 뒀어요",
+        ):
+            with self.subTest(line=line):
+                chunks = split_for_one_line(line)
+                # 마지막 조각을 뺀 모든 조각은 말이 끊기는 자리에서 끝나야 한다.
+                for chunk in chunks[:-1]:
+                    self.assertTrue(
+                        chunk.endswith(BREAK_ENDINGS),
+                        f"{chunk!r} 에서 끊겼다",
+                    )
+
     def test_nothing_is_lost_or_added(self):
         """자막은 소리와 맞춰야 한다. 글자가 바뀌면 그 자리에서 매칭이 깨진다."""
         from app.services.voice import split_for_one_line
