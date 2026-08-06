@@ -5,6 +5,10 @@ from unittest.mock import patch
 
 from app.services import llm, persona
 
+# 지금 등록된 사람 전부. 아래 규칙들은 이 명단을 훑는다 — 사람을 넣으면서 여기를
+# 같이 고치게 해서, 새로 들어온 사람이 규칙 밖에 남지 않게 한다.
+EVERYONE = ("haerinmom", "kimbujang", "parkdaeri", "sumin")
+
 
 class TestRegistry(unittest.TestCase):
     def test_the_configured_persona_exists(self):
@@ -69,28 +73,31 @@ class TestRegistry(unittest.TestCase):
         기록에는 이 사람이 스스로 대는 이름이 남는다. 등록된 이름과 다르면, 그
         기록으로 다시 만들 때 그 사람을 찾지 못한다.
         """
-        for key, speaker in persona.PERSONAS.items():
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        for key in EVERYONE:
             with self.subTest(persona=key):
-                self.assertEqual(speaker.key, key)
+                self.assertEqual(persona.PERSONAS[key].key, key)
 
     def test_nobody_is_allowed_the_advertising_words(self):
         """
         하나만 섞여도 광고가 사람 옷을 입은 것처럼 들린다. 사람을 새로 넣을 때
         빠뜨리기 쉬운 자리다.
         """
-        for key, speaker in persona.PERSONAS.items():
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        for key in EVERYONE:
             with self.subTest(persona=key):
                 for word in ("꿀템", "대박", "인생템", "강추", "필수템"):
-                    self.assertIn(word, speaker.never_say)
+                    self.assertIn(word, persona.PERSONAS[key].never_say)
 
     def test_no_two_people_talk_the_same_way(self):
         """
         이름만 다르고 시키는 것이 같으면, 골라 봐야 같은 대본이 나온다. 채널을
         나눈 이유가 사라진다.
         """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
         for field in ("life", "register", "money"):
             with self.subTest(field=field):
-                said = [getattr(s, field) for s in persona.PERSONAS.values()]
+                said = [getattr(persona.PERSONAS[k], field) for k in EVERYONE]
                 self.assertEqual(len(set(said)), len(said))
 
     def test_people_who_share_a_voice_do_not_share_a_register(self):
@@ -98,8 +105,10 @@ class TestRegistry(unittest.TestCase):
         지금 한국어 목소리가 셋뿐이라 목소리는 겹칠 수 있다. 그때 말투까지 같으면
         두 채널이 같은 사람이 된다.
         """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
         by_voice: dict[str, list[str]] = {}
-        for speaker in persona.PERSONAS.values():
+        for key in EVERYONE:
+            speaker = persona.PERSONAS[key]
             by_voice.setdefault(speaker.voice, []).append(speaker.register)
 
         for voice, registers in by_voice.items():
