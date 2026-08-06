@@ -203,24 +203,27 @@ class TestWhichModelAnswers(unittest.TestCase):
         """
         self.assertEqual(self._spec().resolve_model_name(""), "sonnet")
 
-    def test_what_is_configured_wins(self):
-        """재 본 값이 기본일 뿐이고, 바꿔 쓸 수 있어야 한다."""
-        self.assertEqual(self._spec().resolve_model_name("opus"), "opus")
-
     def test_the_chosen_model_reaches_the_tool(self):
-        """고르기만 하고 안 넘기면 도구의 기본값으로 돈다."""
+        """
+        고르기만 하고 안 넘기면 도구의 기본값으로 돈다. 설정에 적어 둔 것이 있으면
+        그쪽이 이겨야 한다 — 재 본 값이 기본일 뿐이고, 바꿔 쓸 수 있어야 한다.
+        """
         from app.config import config
         from app.services import llm
 
-        with patch.dict(config.app, {"llm_provider": "claude_cli"}):
-            with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
-                llm._generate_response("프롬프트")
+        for configured, expected in (("", "sonnet"), ("opus", "opus")):
+            with self.subTest(configured=configured or "(none)"):
+                settings = {"llm_provider": "claude_cli"}
+                if configured:
+                    settings["claude_cli_model_name"] = configured
+                with patch.dict(config.app, settings):
+                    with patch.object(
+                        subprocess, "Popen", side_effect=_answers()
+                    ) as ran:
+                        llm._generate_response("프롬프트")
 
-        command = ran.call_args.args[0]
-        self.assertEqual(
-            command[command.index("--model") + 1],
-            self._spec().resolve_model_name(""),
-        )
+                command = ran.call_args.args[0]
+                self.assertEqual(command[command.index("--model") + 1], expected)
 
 
 class TestReadingTheAnswer(unittest.TestCase):
