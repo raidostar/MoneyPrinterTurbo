@@ -5,6 +5,10 @@ from unittest.mock import patch
 
 from app.services import llm, persona
 
+# 지금 등록된 사람 전부. 아래 규칙들은 이 명단을 훑는다 — 사람을 넣으면서 여기를
+# 같이 고치게 해서, 새로 들어온 사람이 규칙 밖에 남지 않게 한다.
+EVERYONE = ("haerinmom", "kimbujang", "parkdaeri", "sumin")
+
 
 class TestRegistry(unittest.TestCase):
     def test_the_configured_persona_exists(self):
@@ -64,6 +68,53 @@ class TestRegistry(unittest.TestCase):
         self.assertTrue(persona.PERSONAS["haerinmom"].voice.endswith("-Female"))
         self.assertTrue(persona.PERSONAS["kimbujang"].voice.endswith("-Male"))
 
+    def test_the_name_a_person_records_is_the_name_they_are_filed_under(self):
+        """
+        기록에는 이 사람이 스스로 대는 이름이 남는다. 등록된 이름과 다르면, 그
+        기록으로 다시 만들 때 그 사람을 찾지 못한다.
+        """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        for key in EVERYONE:
+            with self.subTest(persona=key):
+                self.assertEqual(persona.PERSONAS[key].key, key)
+
+    def test_nobody_is_allowed_the_advertising_words(self):
+        """
+        하나만 섞여도 광고가 사람 옷을 입은 것처럼 들린다. 사람을 새로 넣을 때
+        빠뜨리기 쉬운 자리다.
+        """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        for key in EVERYONE:
+            with self.subTest(persona=key):
+                for word in ("꿀템", "대박", "인생템", "강추", "필수템"):
+                    self.assertIn(word, persona.PERSONAS[key].never_say)
+
+    def test_no_two_people_talk_the_same_way(self):
+        """
+        이름만 다르고 시키는 것이 같으면, 골라 봐야 같은 대본이 나온다. 채널을
+        나눈 이유가 사라진다.
+        """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        for field in ("life", "register", "money"):
+            with self.subTest(field=field):
+                said = [getattr(persona.PERSONAS[k], field) for k in EVERYONE]
+                self.assertEqual(len(set(said)), len(said))
+
+    def test_people_who_share_a_voice_do_not_share_a_register(self):
+        """
+        지금 한국어 목소리가 셋뿐이라 목소리는 겹칠 수 있다. 그때 말투까지 같으면
+        두 채널이 같은 사람이 된다.
+        """
+        self.assertEqual(set(EVERYONE), set(persona.PERSONAS))
+        by_voice: dict[str, list[str]] = {}
+        for key in EVERYONE:
+            speaker = persona.PERSONAS[key]
+            by_voice.setdefault(speaker.voice, []).append(speaker.register)
+
+        for voice, registers in by_voice.items():
+            with self.subTest(voice=voice):
+                self.assertEqual(len(set(registers)), len(registers))
+
     def test_an_unknown_name_is_not_written_into_the_log(self):
         """이 칸에 다른 것을 잘못 넣어 보낼 수 있다."""
         secret = "sk-abcdef0123456789"
@@ -72,6 +123,49 @@ class TestRegistry(unittest.TestCase):
 
         said = " ".join(str(call.args[0]) for call in warned.call_args_list)
         self.assertNotIn(secret, said)
+
+
+class TestThePeopleWhoLiveAlone(unittest.TestCase):
+    """
+    혼자 사는 사람을 다루는 채널 둘. 채널마다 다른 물건을 팔고 다른 사람이 본다.
+    """
+
+    def test_both_are_registered(self):
+        for key, name in (("parkdaeri", "박대리"), ("sumin", "수민")):
+            with self.subTest(persona=key):
+                speaker = persona.resolve(key)
+                self.assertIsNotNone(speaker)
+                self.assertEqual(speaker.name, name)
+
+    def test_each_one_sounds_like_who_they_are(self):
+        """
+        30대 남자와 20대 여자가 같은 어미로 말하면, 채널을 나눈 이유가 없다.
+        """
+        self.assertIn("~했음", persona.PERSONAS["parkdaeri"].register)
+        self.assertIn("~했어,", persona.PERSONAS["sumin"].register)
+
+    def test_each_one_has_a_voice_of_the_right_kind(self):
+        """자취남 대본을 여자 목소리가 읽으면 그 자리에서 어긋난다."""
+        self.assertTrue(persona.PERSONAS["parkdaeri"].voice.endswith("-Male"))
+        self.assertTrue(persona.PERSONAS["sumin"].voice.endswith("-Female"))
+
+    def test_their_scenes_come_from_living_alone(self):
+        """
+        장면이 어디서 나오는지 안 적어 두면, 모델이 아무 집이나 지어낸다.
+        """
+        for key in ("parkdaeri", "sumin"):
+            with self.subTest(persona=key):
+                said = persona.PERSONAS[key].as_prompt()
+                self.assertIn("one-room", said)
+                self.assertIn("alone", said)
+
+    def test_children_are_not_their_world(self):
+        """
+        해린맘이 있는데 자취 채널에서 아이 이야기가 나오면 두 채널이 섞인다.
+        """
+        for key in ("parkdaeri", "sumin"):
+            with self.subTest(persona=key):
+                self.assertIn("childcare", persona.PERSONAS[key].out_of_scope)
 
 
 class TestWhatThePersonaSays(unittest.TestCase):
