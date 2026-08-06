@@ -935,3 +935,67 @@ class TestOneStretchOfTime(unittest.TestCase):
             with self.subTest(ending=name):
                 self.assertNotIn("you are thinking about", body)
                 self.assertNotIn("have not tried", body)
+
+
+class TestOnlyWhatYouNoticed(unittest.TestCase):
+    """
+    물건이 실제로 안 하는 일을 했다고 쓰면, 써 본 사람은 바로 안다. 실제로
+    "물빠짐이 다르고" 가 나왔는데, 샤워필터는 배수를 바꾸지 않는다.
+    """
+
+    def _prompt(self):
+        return " ".join(llm.script_style_prompt("product").split())
+
+    def test_only_what_the_senses_registered(self):
+        said = self._prompt()
+        self.assertIn("Stay inside what your senses registered", said)
+
+    def test_the_machinery_is_out_of_bounds(self):
+        """
+        속에서 어떻게 도는지, 손대지도 않는 것이 어떻게 됐는지는 본 것이 아니다.
+        """
+        said = self._prompt()
+        self.assertIn("Never reach for the machinery", said)
+        self.assertIn("does not touch", said)
+
+    def test_naming_what_stayed_the_same_is_offered(self):
+        """
+        확실하지 않으면 빼는 편이 낫고, 안 바뀐 것을 짚는 쪽이 오히려 세다 —
+        "물살은 똑같은데, 머리가 안 뻣뻣하더라구요" 처럼.
+        """
+        said = self._prompt()
+        self.assertIn("leave it out", said)
+        self.assertIn("naming what stayed the same", said)
+
+    def test_the_two_korean_traps_are_named(self):
+        """
+        물빠짐은 배수, 물이 세다는 수압이다. 둘 다 센물이 하는 일이 아니다.
+        """
+        said = self._prompt()
+        self.assertIn("물빠짐", said)
+        self.assertIn("물이 세다", said)
+        self.assertIn("물이 억세다", said)
+
+
+class TestTheScriptIsNotAnAnnouncement(unittest.TestCase):
+    """
+    무엇을 쓸지 밝히고 시작하는 줄이 붙어 올 때가 있다. 그대로 두면 영상이
+    "해린맘 목소리로 스크립트를 써볼게요" 를 읽는다.
+
+    받아 놓고 지우지는 않는다. 앞머리처럼 보이는 것과 진짜 첫 문단을 글자만 보고
+    가를 수 없어서다 — "이 영상에서는 좋은 대본 쓰는 법을 알려드릴게요" 는 지우면
+    안 되는 첫 문단이다. 잘못 지우면 첫 장면이 조용히 사라지는데, 붙어 나온 앞머리는
+    승인 화면에서 눈에 보이고 다시 뽑으면 된다.
+    """
+
+    def test_the_script_is_told_not_to_introduce_itself(self):
+        said = " ".join(llm.script_style_prompt("product").split())
+
+        self.assertIn("your first line is already the script", said)
+        self.assertIn("never say what you are about to write", said)
+
+    def test_the_reason_is_stated(self):
+        """왜 안 되는지가 없으면 규칙 하나가 더 늘어난 것으로만 읽힌다."""
+        said = " ".join(llm.script_style_prompt("product").split())
+
+        self.assertIn("read aloud in the video", said)
