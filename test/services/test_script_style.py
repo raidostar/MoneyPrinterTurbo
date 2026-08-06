@@ -885,3 +885,53 @@ class TestEveryEntryPointGetsVariety(unittest.TestCase):
 
         self.assertEqual(seen["voices"], set())
         self.assertEqual(seen["endings"], set())
+
+
+class TestOneStretchOfTime(unittest.TestCase):
+    """
+    한 대본에 시점이 여럿 섞이면 언제 있었던 일인지 알 수 없다. 실제로 파리에서
+    있었던 일로 시작해 "다음 유럽여행엔 넣어 갔음" 으로 넘어가고 "오늘 밤 물부터
+    받아볼 생각임" 으로 끝난 대본이 나왔다 — 지난 여행인지 지금 여행인지 읽는
+    사람이 못 정한다.
+    """
+
+    def _prompt(self):
+        return " ".join(llm.script_style_prompt("product").split())
+
+    def test_the_story_is_one_stretch_of_time(self):
+        said = self._prompt()
+        self.assertIn("one stretch of time", said)
+        self.assertIn("all of it has already happened", said)
+
+    def test_the_trouble_and_the_fix_are_the_same_story(self):
+        """
+        문제와 해결이 다른 회차에서 일어나면, 여행 물건처럼 사이가 벌어지는
+        소재에서 두 이야기가 겹쳐 들린다.
+        """
+        said = self._prompt()
+        self.assertIn("belong to the same story", said)
+        self.assertIn("다음 여행엔 챙겨 갔음", said)
+
+    def test_the_fix_is_not_a_plan(self):
+        said = self._prompt()
+        self.assertIn("never turn the fix into something you plan to do", said)
+
+    def test_the_last_line_stays_in_the_same_stretch(self):
+        said = self._prompt()
+        self.assertIn("lands inside the same stretch of time", said)
+        self.assertIn("not tomorrow and not a plan", said)
+
+    def test_the_loose_end_is_spoken_of_in_the_past(self):
+        """
+        "아직 안 끝난 것" 으로 끝내라고만 하면 모델이 내일 이야기를 쓴다. 본문은
+        끝난 과거라 그 자리에서 어긋난다.
+        """
+        said = llm.PRODUCT_ENDINGS["unfinished"]
+        self.assertIn("in the past", said)
+        self.assertIn("Not tomorrow, not tonight, not a plan", said)
+
+    def test_no_ending_asks_for_something_that_has_not_happened(self):
+        for name, body in llm.PRODUCT_ENDINGS.items():
+            with self.subTest(ending=name):
+                self.assertNotIn("you are thinking about", body)
+                self.assertNotIn("have not tried", body)
