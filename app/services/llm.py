@@ -647,6 +647,14 @@ def _generate_response(prompt: str) -> str:
                     "please set it in the config.toml file."
                 )
 
+        if adapter == "cli":
+            # 이미 깔려 있는 도구를 부른다. 키도 주소도 없고, 답은 그대로 글이다.
+            from app.services import llm_cli
+
+            return _normalize_text_response(
+                llm_cli.run(llm_provider, prompt, model_name), llm_provider
+            )
+
         if adapter == "qwen":
             import dashscope
             from dashscope.api_entities.dashscope_response import GenerationResponse
