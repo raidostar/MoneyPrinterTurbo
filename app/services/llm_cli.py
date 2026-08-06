@@ -25,6 +25,7 @@ Codex 는 여기에 없다. 같은 시험에서 파일을 읽어 왔는데 도�
 
 import subprocess
 import tempfile
+import threading
 
 from loguru import logger
 
@@ -46,34 +47,61 @@ NO_CUSTOMIZATIONS = ("--safe-mode",)
 
 
 def _run(command: list[str], prompt: str) -> str:
-    """도구를 부르고 답을 돌려준다."""
+    """
+    도구를 부르고 답을 돌려준다.
+
+    받아 놓고 재지 않는다. 다 받은 뒤에 길이를 보면, 끝없이 뱉는 도구 하나가 이
+    프로세스의 메모리를 먼저 채운다. 상한까지만 읽고 거기서 끊는다.
+
+    도구가 표준오류로 뱉는 말은 아예 안 받는다. 어차피 옮기지 않는 값이고, 받아만
+    두면 그쪽 관이 차서 도구가 멈춘 채로 시간만 흐른다.
+    """
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(  # noqa: S603 - 인자 목록이라 셸을 거치지 않는다
             command,
-            input=prompt,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
-            timeout=TIMEOUT_SECONDS,
             # 이 도구는 도는 자리의 설정 파일을 읽는다. 작업 디렉터리를 넘겨받은
             # 곳으로 두면 그쪽 설정까지 따라가므로, 부르는 자리를 고정한다.
             cwd=tempfile.gettempdir(),
         )
     except FileNotFoundError:
         raise ValueError(f"{command[0]} is not installed") from None
-    except subprocess.TimeoutExpired:
-        raise ValueError(f"{command[0]} did not answer in time") from None
 
-    if result.returncode != 0:
+    answer: list[str] = []
+
+    def read_bounded() -> None:
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+            # 상한보다 한 글자 더 읽어, 넘겼는지 아닌지를 가른다.
+            answer.append(process.stdout.read(MAX_OUTPUT_CHARS + 1))
+        except OSError:
+            # 도구가 먼저 죽으면 관이 닫힌다. 종료 코드로 판단한다.
+            answer.append("")
+
+    reader = threading.Thread(target=read_bounded, daemon=True)
+    reader.start()
+    reader.join(TIMEOUT_SECONDS)
+    if reader.is_alive():
+        process.kill()
+        raise ValueError(f"{command[0]} did not answer in time")
+
+    said = answer[0] if answer else ""
+    if len(said) > MAX_OUTPUT_CHARS:
+        process.kill()
+        raise ValueError(f"{command[0]} answered with too much text")
+
+    if process.wait(timeout=TIMEOUT_SECONDS) != 0:
         # 도구가 뱉은 말은 어디에도 옮기지 않는다 — 사용자 화면에도, 로그에도.
         # 인증 토큰과 설정 경로가 섞여 나오고, 로그는 나중에 통째로 공유된다.
         # 무엇이 일어났는지 짚는 데는 이름과 종료 코드로 충분하다.
-        logger.warning(f"{command[0]} exited with {result.returncode}")
+        logger.warning(f"{command[0]} exited with {process.returncode}")
         raise ValueError(f"{command[0]} failed")
 
-    answer = result.stdout
-    if len(answer) > MAX_OUTPUT_CHARS:
-        raise ValueError(f"{command[0]} answered with too much text")
-    return answer.strip()
+    return said.strip()
 
 
 def claude(prompt: str, model_name: str = "") -> str:

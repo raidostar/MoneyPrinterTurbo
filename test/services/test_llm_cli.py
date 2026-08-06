@@ -2,23 +2,59 @@
 
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from app.services import llm_cli
 
 
-def _done(stdout="답", returncode=0, stderr=""):
-    return subprocess.CompletedProcess(
-        args=[], returncode=returncode, stdout=stdout, stderr=stderr
-    )
+class _Pipe:
+    """받아 적기만 하는 stdin. 코드가 닫은 뒤에도 무엇이 들어갔는지 봐야 한다."""
+
+    def __init__(self):
+        self.written = ""
+        self.closed = False
+
+    def write(self, text):
+        self.written += text
+
+    def close(self):
+        self.closed = True
 
 
-def _answers(text="답"):
-    def run(command, **kwargs):
-        return _done(stdout=text)
+class _FakeProcess:
+    """도구인 척한다. read(n) 은 진짜처럼 n 글자까지만 돌려준다."""
 
-    return run
+    def __init__(self, text="답", returncode=0, endless=False):
+        self.text = text
+        self.returncode = returncode
+        self.endless = endless
+        self.killed = False
+        self.read_sizes = []
+        self.stdin = _Pipe()
+        self.stdout = self
+
+    def read(self, size):
+        self.read_sizes.append(size)
+        return "가" * size if self.endless else self.text
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def _answers(text="답", returncode=0, endless=False):
+    made = []
+
+    def open_process(command, **kwargs):
+        made.append(_FakeProcess(text, returncode, endless))
+        return made[-1]
+
+    open_process.made = made
+    return open_process
 
 
 class TestHowItIsCalled(unittest.TestCase):
@@ -29,18 +65,23 @@ class TestHowItIsCalled(unittest.TestCase):
         """
         for name, runner in llm_cli.RUNNERS.items():
             with self.subTest(provider=name):
-                with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+                opener = _answers()
+                with patch.object(subprocess, "Popen", side_effect=opener) as ran:
                     runner("비밀이 섞인 프롬프트")
 
-                self.assertEqual(ran.call_args.kwargs["input"], "비밀이 섞인 프롬프트")
-                self.assertNotIn("비밀이 섞인 프롬프트", " ".join(ran.call_args.args[0]))
+                self.assertEqual(
+                    opener.made[0].stdin.written, "비밀이 섞인 프롬프트"
+                )
+                self.assertNotIn(
+                    "비밀이 섞인 프롬프트", " ".join(ran.call_args.args[0])
+                )
 
     def test_every_tool_is_turned_off(self):
         """
         이 도구는 프롬프트를 지시로 읽는 대리자고, 프롬프트에는 바깥에서 온 글이
         들어 있다. 하나라도 열려 있으면 그 하나로 이 기계의 파일을 읽어 간다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
 
         command = ran.call_args.args[0]
@@ -52,7 +93,7 @@ class TestHowItIsCalled(unittest.TestCase):
         이름을 하나씩 대면 그 목록에 없는 것이 열린다 — 다음 판에 생기는 도구,
         붙여 둔 MCP 서버, 플러그인. 전부 끄는 쪽이어야 한다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
 
         command = ran.call_args.args[0]
@@ -64,7 +105,7 @@ class TestHowItIsCalled(unittest.TestCase):
         --allowedTools 는 자동 승인 목록이지 제한이 아니다. 없는 이름 하나만 적어
         둬도 파일을 그대로 읽어 왔다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
 
         self.assertNotIn("--allowedTools", ran.call_args.args[0])
@@ -74,7 +115,7 @@ class TestHowItIsCalled(unittest.TestCase):
         도구만 끄면 CLAUDE.md, 스킬, 플러그인, 훅, MCP 서버가 그대로 남아, 답이
         이 기계의 설정에 따라 달라진다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
 
         self.assertIn("--safe-mode", ran.call_args.args[0])
@@ -84,27 +125,29 @@ class TestHowItIsCalled(unittest.TestCase):
         값을 여러 개 받는 옵션이다. 뒤에 플래그를 두면 그것이 도구 이름으로 먹혀서,
         전부 끄려던 것이 그 하나만 켜 두는 설정이 된다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트", "claude-opus-5")
 
         command = ran.call_args.args[0]
         self.assertEqual(command[command.index("--tools") :], ["--tools", ""])
 
     def test_it_does_not_wait_forever(self):
-        for name, runner in llm_cli.RUNNERS.items():
-            with self.subTest(provider=name):
-                with patch.object(subprocess, "run", side_effect=_answers()) as ran:
-                    runner("프롬프트")
-                self.assertEqual(
-                    ran.call_args.kwargs["timeout"], llm_cli.TIMEOUT_SECONDS
-                )
+        """읽기가 안 끝나면 기다리기를 그만두고 도구를 죽인다."""
+        opener = _answers()
+        with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
+            with patch.object(subprocess, "Popen", side_effect=opener):
+                with patch.object(_FakeProcess, "read", lambda self, n: time.sleep(30)):
+                    with self.assertRaises(ValueError):
+                        llm_cli.claude("프롬프트")
+
+        self.assertTrue(opener.made[0].killed)
 
     def test_it_runs_somewhere_neutral(self):
         """
         이 도구들은 도는 자리의 설정 파일을 읽는다. 넘겨받은 곳에서 부르면 그쪽
         설정까지 따라간다.
         """
-        with patch.object(subprocess, "run", return_value=_done()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
         self.assertEqual(ran.call_args.kwargs["cwd"], tempfile.gettempdir())
 
@@ -119,11 +162,11 @@ class TestHowItIsCalled(unittest.TestCase):
         self.assertIsNone(get_llm_provider("codex_cli"))
 
     def test_a_model_is_passed_only_when_asked_for(self):
-        with patch.object(subprocess, "run", return_value=_done()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
         self.assertNotIn("--model", ran.call_args.args[0])
 
-        with patch.object(subprocess, "run", return_value=_done()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트", "claude-opus-5")
         command = ran.call_args.args[0]
         self.assertEqual(command[command.index("--model") + 1], "claude-opus-5")
@@ -131,43 +174,62 @@ class TestHowItIsCalled(unittest.TestCase):
 
 class TestReadingTheAnswer(unittest.TestCase):
     def test_the_answer_comes_back_trimmed(self):
-        with patch.object(subprocess, "run", return_value=_done(stdout="  대본  \n")):
+        with patch.object(subprocess, "Popen", side_effect=_answers("  대본  \n")):
             self.assertEqual(llm_cli.claude("프롬프트"), "대본")
 
-    def test_a_flood_of_text_is_refused(self):
-        """대본은 수백 자다. 이보다 크면 답이 아니라 다른 무엇이다."""
-        with patch.object(
-            subprocess,
-            "run",
-            return_value=_done(stdout="가" * (llm_cli.MAX_OUTPUT_CHARS + 1)),
-        ):
+    def test_a_flood_of_text_is_refused_without_swallowing_it(self):
+        """
+        다 받아 놓고 길이를 재면, 끝없이 뱉는 도구 하나가 이 프로세스의 메모리를
+        먼저 채운다. 상한까지만 읽고 거기서 끊어야 한다.
+        """
+        opener = _answers(endless=True)
+        with patch.object(subprocess, "Popen", side_effect=opener):
             with self.assertRaises(ValueError):
                 llm_cli.claude("프롬프트")
+
+        process = opener.made[0]
+        # 읽은 양이 상한을 한 글자만 넘는다. 판정에 필요한 최소한이다.
+        self.assertEqual(process.read_sizes, [llm_cli.MAX_OUTPUT_CHARS + 1])
+        self.assertTrue(process.killed)
+
+    def test_the_tool_never_writes_into_our_error_channel(self):
+        """받아만 두고 안 읽으면 그쪽 관이 차서 도구가 멈춘 채로 시간만 흐른다."""
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
+            llm_cli.claude("프롬프트")
+
+        self.assertEqual(ran.call_args.kwargs["stderr"], subprocess.DEVNULL)
 
 
 class TestWhenItGoesWrong(unittest.TestCase):
     def test_a_missing_tool_says_so(self):
-        with patch.object(subprocess, "run", side_effect=FileNotFoundError()):
+        with patch.object(subprocess, "Popen", side_effect=FileNotFoundError()):
             with self.assertRaises(ValueError) as caught:
                 llm_cli.claude("프롬프트")
         self.assertIn("not installed", str(caught.exception))
 
     def test_a_tool_that_never_answers_is_not_waited_on_forever(self):
-        with patch.object(
-            subprocess, "run", side_effect=subprocess.TimeoutExpired("claude", 1)
-        ):
-            with self.assertRaises(ValueError) as caught:
-                llm_cli.claude("프롬프트")
+        opener = _answers()
+
+        def never_returns(self, size):
+            time.sleep(30)
+            return ""
+
+        with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
+            with patch.object(subprocess, "Popen", side_effect=opener):
+                with patch.object(_FakeProcess, "read", never_returns):
+                    with self.assertRaises(ValueError) as caught:
+                        llm_cli.claude("프롬프트")
+
         self.assertIn("in time", str(caught.exception))
+        # 기다리다 만 도구를 그대로 두면 프로세스가 쌓인다.
+        self.assertTrue(opener.made[0].killed)
 
     def test_what_the_tool_printed_is_not_handed_to_the_user(self):
         """
         오류 문구에는 경로와 설정이 섞여 있고, 그 문구는 사용자에게 그대로 보인다.
         """
         secret = "/Users/kh/.config/openai/auth.json token=sk-abcdef0123456789"
-        with patch.object(
-            subprocess, "run", return_value=_done(returncode=1, stderr=secret)
-        ):
+        with patch.object(subprocess, "Popen", side_effect=_answers(returncode=1)):
             with patch.object(llm_cli.logger, "warning") as warned:
                 with self.assertRaises(ValueError) as caught:
                     llm_cli.claude("프롬프트")
@@ -186,7 +248,7 @@ class TestWhenItGoesWrong(unittest.TestCase):
         모르는 이름을 아무 도구로나 흘려보내면, 설정에 오타 하나로 다른 도구가
         조용히 돌아간다.
         """
-        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+        with patch.object(subprocess, "Popen", side_effect=_answers()) as ran:
             with self.assertRaises(ValueError):
                 llm_cli.run("없는도구", "프롬프트")
 
