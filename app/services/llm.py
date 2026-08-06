@@ -1033,6 +1033,12 @@ def generate_script(
     custom_system_prompt = _limit_script_text(
         custom_system_prompt, MAX_SCRIPT_SYSTEM_PROMPT_LENGTH, "custom_system_prompt"
     )
+    # 고르지 않았으면 여기서 뽑는다. 정해진 값으로 떨어지게 두면, 작업 파이프라인을
+    # 거치지 않는 쪽 — 봇, 화면의 대본 만들기, /scripts — 은 매번 같은 여는 방식과
+    # 같은 끝내는 법으로만 쓰게 된다. 실제로 봇이 만든 대본은 전부 한 가지였다.
+    if resolve_script_style(script_style) == "product":
+        product_voice = product_voice or pick_product_voice()
+        product_ending = product_ending or pick_product_ending()
     prompt = build_script_prompt(
         video_subject=video_subject,
         language=language,

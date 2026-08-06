@@ -739,8 +739,12 @@ class TestHowItEnds(unittest.TestCase):
             video_subject="외장하드", script_style="product", product_ending=ending
         )
 
-    def test_there_is_more_than_one_way_to_end(self):
-        self.assertGreaterEqual(len(llm.PRODUCT_ENDINGS), 3)
+    def test_there_are_at_least_as_many_endings_as_openings(self):
+        """
+        끝이 여는 쪽보다 빨리 낡는다. 여는 방식보다 적게 두면, 이어 보는 사람이
+        끝에서 먼저 같은 것을 듣는다.
+        """
+        self.assertGreaterEqual(len(llm.PRODUCT_ENDINGS), len(llm.PRODUCT_VOICES))
 
     def test_each_ending_asks_for_something_different(self):
         """이름만 다르고 시키는 것이 같으면, 뽑아 써도 결과가 그대로다."""
@@ -818,3 +822,66 @@ class TestHowItEnds(unittest.TestCase):
         for name, body in llm.PRODUCT_ENDINGS.items():
             with self.subTest(ending=name):
                 self.assertNotIn("오늘도 ", body)
+
+
+class TestEveryEntryPointGetsVariety(unittest.TestCase):
+    """
+    봇과 화면의 대본 만들기, /scripts 는 작업 파이프라인을 거치지 않고 여기를 바로
+    부른다. 고르지 않았을 때 정해진 값으로 떨어지면, 그쪽으로 만든 대본은 전부
+    같은 여는 방식과 같은 끝내는 법이 된다.
+    """
+
+    def _devices(self, **kwargs):
+        seen = {"voices": set(), "endings": set()}
+
+        def remember(prompt, **_):
+            for name, body in llm.PRODUCT_VOICES.items():
+                if body in prompt:
+                    seen["voices"].add(name)
+            for name, body in llm.PRODUCT_ENDINGS.items():
+                if body in prompt:
+                    seen["endings"].add(name)
+            return "대본"
+
+        with patch.object(llm, "_generate_response", side_effect=remember):
+            for _ in range(120):
+                llm.generate_script(video_subject="주제", script_style="product", **kwargs)
+        return seen
+
+    def test_a_caller_that_picks_nothing_still_gets_variety(self):
+        seen = self._devices()
+
+        self.assertEqual(seen["voices"], set(llm.PRODUCT_VOICES))
+        self.assertEqual(seen["endings"], set(llm.PRODUCT_ENDINGS))
+
+    def test_what_the_caller_chose_is_not_overridden(self):
+        """기록으로 다시 만들면 같은 대본이 나와야 한다."""
+        seen = self._devices(product_voice="days", product_ending="unfinished")
+
+        self.assertEqual(seen["voices"], {"days"})
+        self.assertEqual(seen["endings"], {"unfinished"})
+
+    def test_a_hand_written_prompt_gets_no_devices(self):
+        seen = self._devices(custom_system_prompt="내가 쓴 프롬프트")
+
+        self.assertEqual(seen["voices"], set())
+        self.assertEqual(seen["endings"], set())
+
+    def test_other_styles_get_no_devices(self):
+        seen = {"voices": set(), "endings": set()}
+
+        def remember(prompt, **_):
+            for name, body in llm.PRODUCT_VOICES.items():
+                if body in prompt:
+                    seen["voices"].add(name)
+            for name, body in llm.PRODUCT_ENDINGS.items():
+                if body in prompt:
+                    seen["endings"].add(name)
+            return "대본"
+
+        with patch.object(llm, "_generate_response", side_effect=remember):
+            for _ in range(20):
+                llm.generate_script(video_subject="주제", script_style="informative")
+
+        self.assertEqual(seen["voices"], set())
+        self.assertEqual(seen["endings"], set())
