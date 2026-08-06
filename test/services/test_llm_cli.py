@@ -49,14 +49,34 @@ class TestHowItIsCalled(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertIn(tool, command)
 
-    def test_the_tools_that_can_read_files_are_named(self):
+    def test_the_denial_is_not_a_list_of_names(self):
         """
-        목록에서 이름 하나가 빠지면 그것만 살아난다. 파일을 읽거나 명령을 돌리는
-        것부터 이름을 대고 확인한다.
+        이름을 하나씩 대면 그 목록에 없는 것이 열린다 — 다음 판에 생기는 도구,
+        붙여 둔 MCP 서버, 플러그인. 전부 막는 쪽이어야 한다.
         """
-        for tool in ("Bash", "Read", "Glob", "Grep", "WebFetch", "Task"):
-            with self.subTest(tool=tool):
-                self.assertIn(tool, llm_cli.NO_TOOLS)
+        self.assertIn("*", llm_cli.NO_TOOLS)
+        self.assertIn("mcp__*", llm_cli.NO_TOOLS)
+
+    def test_an_allow_list_is_not_used_to_restrict(self):
+        """
+        --allowedTools 는 자동 승인 목록이지 제한이 아니다. 없는 이름 하나만 적어
+        둬도 파일을 그대로 읽어 왔다.
+        """
+        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+            llm_cli.claude("프롬프트")
+
+        self.assertNotIn("--allowedTools", ran.call_args.args[0])
+
+    def test_this_machine_settings_are_not_pulled_in(self):
+        """
+        도구 이름만 막아 두면 설정 쪽에서 붙은 MCP 서버가 그대로 남는다.
+        """
+        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+            llm_cli.claude("프롬프트")
+
+        command = ran.call_args.args[0]
+        self.assertIn("--strict-mcp-config", command)
+        self.assertEqual(command[command.index("--setting-sources") + 1], "")
 
     def test_nothing_follows_the_list_of_tools(self):
         """
