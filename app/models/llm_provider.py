@@ -81,17 +81,8 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.moonshot.cn/v1",
     ),
     # 이미 구독해서 쓰는 명령줄 도구. 키가 없고, 사용량은 사람이 직접 쓸 때와 같은
-    # 통에서 나간다.
-    LLMProviderSpec(
-        "codex_cli",
-        "Codex CLI (구독)",
-        adapter="cli",
-        requires_api_key=False,
-        requires_model_name=False,
-        requires_base_url=False,
-        show_api_key=False,
-        show_base_url=False,
-    ),
+    # 통에서 나간다. Codex 는 여기 없다 — 도구를 끌 방법이 없어 프롬프트에 섞인
+    # 바깥 글로 이 기계의 파일을 읽어 갈 수 있었다.
     LLMProviderSpec(
         "claude_cli",
         "Claude Code CLI (구독)",

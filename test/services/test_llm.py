@@ -274,7 +274,6 @@ class TestLiteLLMProvider(unittest.TestCase):
             [
                 "moonshot",
                 # 이미 구독해서 쓰는 도구. 키가 없어 바로 켤 수 있으므로 앞에 둔다.
-                "codex_cli",
                 "claude_cli",
                 "openai",
                 "gemini",

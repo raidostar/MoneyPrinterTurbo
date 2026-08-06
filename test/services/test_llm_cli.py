@@ -15,13 +15,7 @@ def _done(stdout="답", returncode=0, stderr=""):
 
 
 def _answers(text="답"):
-    """codex 는 답을 파일로 쓴다. 흉내 낼 때도 써 줘야 실제 경로를 지난다."""
-
     def run(command, **kwargs):
-        if "-o" in command:
-            path = command[command.index("-o") + 1]
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(text)
         return _done(stdout=text)
 
     return run
@@ -41,16 +35,40 @@ class TestHowItIsCalled(unittest.TestCase):
                 self.assertEqual(ran.call_args.kwargs["input"], "비밀이 섞인 프롬프트")
                 self.assertNotIn("비밀이 섞인 프롬프트", " ".join(ran.call_args.args[0]))
 
-    def test_the_tool_gets_no_permissions(self):
-        """대본을 쓰는 프롬프트가 파일을 건드릴 이유가 없다."""
-        with patch.object(subprocess, "run", return_value=_done()) as ran:
-            llm_cli.claude("프롬프트")
-        self.assertIn("--allowedTools", ran.call_args.args[0])
-
+    def test_every_tool_is_turned_off(self):
+        """
+        이 도구는 프롬프트를 지시로 읽는 대리자고, 프롬프트에는 바깥에서 온 글이
+        들어 있다. 하나라도 열려 있으면 그 하나로 이 기계의 파일을 읽어 간다.
+        """
         with patch.object(subprocess, "run", side_effect=_answers()) as ran:
-            llm_cli.codex("프롬프트")
+            llm_cli.claude("프롬프트")
+
         command = ran.call_args.args[0]
-        self.assertIn("read-only", command)
+        self.assertIn("--disallowedTools", command)
+        for tool in llm_cli.NO_TOOLS:
+            with self.subTest(tool=tool):
+                self.assertIn(tool, command)
+
+    def test_the_tools_that_can_read_files_are_named(self):
+        """
+        목록에서 이름 하나가 빠지면 그것만 살아난다. 파일을 읽거나 명령을 돌리는
+        것부터 이름을 대고 확인한다.
+        """
+        for tool in ("Bash", "Read", "Glob", "Grep", "WebFetch", "Task"):
+            with self.subTest(tool=tool):
+                self.assertIn(tool, llm_cli.NO_TOOLS)
+
+    def test_nothing_follows_the_list_of_tools(self):
+        """
+        값을 여러 개 받는 옵션이다. 뒤에 플래그를 두면 그것까지 도구 이름으로
+        먹혀서, 옵션이 통째로 무시되거나 도구가 열린다.
+        """
+        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+            llm_cli.claude("프롬프트", "claude-opus-5")
+
+        command = ran.call_args.args[0]
+        after = command[command.index("--disallowedTools") + 1 :]
+        self.assertEqual(sorted(after), sorted(llm_cli.NO_TOOLS))
 
     def test_it_does_not_wait_forever(self):
         for name, runner in llm_cli.RUNNERS.items():
@@ -70,6 +88,16 @@ class TestHowItIsCalled(unittest.TestCase):
             llm_cli.claude("프롬프트")
         self.assertEqual(ran.call_args.kwargs["cwd"], tempfile.gettempdir())
 
+    def test_codex_is_not_offered(self):
+        """
+        같은 시험에서 파일을 읽어 왔는데, 도구를 끄는 방법을 찾지 못했다.
+        read-only 는 쓰기만 막고 읽기와 셸 실행은 그대로 둔다.
+        """
+        from app.models.llm_provider import get_llm_provider
+
+        self.assertNotIn("codex_cli", llm_cli.RUNNERS)
+        self.assertIsNone(get_llm_provider("codex_cli"))
+
     def test_a_model_is_passed_only_when_asked_for(self):
         with patch.object(subprocess, "run", return_value=_done()) as ran:
             llm_cli.claude("프롬프트")
@@ -85,26 +113,6 @@ class TestReadingTheAnswer(unittest.TestCase):
     def test_the_answer_comes_back_trimmed(self):
         with patch.object(subprocess, "run", return_value=_done(stdout="  대본  \n")):
             self.assertEqual(llm_cli.claude("프롬프트"), "대본")
-
-    def test_codex_reads_the_answer_from_the_file_it_wrote(self):
-        """
-        표준출력에는 진행 상황과 토큰 수가 함께 나온다. 그대로 쓰면 대본 앞뒤에
-        도구가 한 말이 붙는다.
-        """
-
-        def write_answer(command, **kwargs):
-            path = command[command.index("-o") + 1]
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write("진짜 대본")
-            return _done(stdout="tokens used 2,578\n진행 상황\n")
-
-        with patch.object(subprocess, "run", side_effect=write_answer):
-            self.assertEqual(llm_cli.codex("프롬프트"), "진짜 대본")
-
-    def test_codex_that_wrote_nothing_is_a_failure(self):
-        with patch.object(subprocess, "run", return_value=_done()):
-            with self.assertRaises(ValueError):
-                llm_cli.codex("프롬프트")
 
     def test_a_flood_of_text_is_refused(self):
         """대본은 수백 자다. 이보다 크면 답이 아니라 다른 무엇이다."""
@@ -170,11 +178,11 @@ class TestThroughTheService(unittest.TestCase):
         from app.config import config
         from app.services import llm
 
-        with patch.dict(config.app, {"llm_provider": "codex_cli"}):
+        with patch.dict(config.app, {"llm_provider": "claude_cli"}):
             with patch.object(llm_cli, "run", return_value="대본") as run:
                 self.assertEqual(llm._generate_response("프롬프트"), "대본")
 
-        self.assertEqual(run.call_args.args[0], "codex_cli")
+        self.assertEqual(run.call_args.args[0], "claude_cli")
         self.assertEqual(run.call_args.args[1], "프롬프트")
 
     def test_neither_needs_a_key_or_an_address(self):
