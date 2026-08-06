@@ -935,3 +935,107 @@ class TestOneStretchOfTime(unittest.TestCase):
             with self.subTest(ending=name):
                 self.assertNotIn("you are thinking about", body)
                 self.assertNotIn("have not tried", body)
+
+
+class TestOnlyWhatYouNoticed(unittest.TestCase):
+    """
+    물건이 실제로 안 하는 일을 했다고 쓰면, 써 본 사람은 바로 안다. 실제로
+    "물빠짐이 다르고" 가 나왔는데, 샤워필터는 배수를 바꾸지 않는다.
+    """
+
+    def _prompt(self):
+        return " ".join(llm.script_style_prompt("product").split())
+
+    def test_only_what_the_senses_registered(self):
+        said = self._prompt()
+        self.assertIn("Stay inside what your senses registered", said)
+
+    def test_the_machinery_is_out_of_bounds(self):
+        """
+        속에서 어떻게 도는지, 손대지도 않는 것이 어떻게 됐는지는 본 것이 아니다.
+        """
+        said = self._prompt()
+        self.assertIn("Never reach for the machinery", said)
+        self.assertIn("does not touch", said)
+
+    def test_naming_what_stayed_the_same_is_offered(self):
+        """
+        확실하지 않으면 빼는 편이 낫고, 안 바뀐 것을 짚는 쪽이 오히려 세다 —
+        "물살은 똑같은데, 머리가 안 뻣뻣하더라구요" 처럼.
+        """
+        said = self._prompt()
+        self.assertIn("leave it out", said)
+        self.assertIn("naming what stayed the same", said)
+
+    def test_the_two_korean_traps_are_named(self):
+        """
+        물빠짐은 배수, 물이 세다는 수압이다. 둘 다 센물이 하는 일이 아니다.
+        """
+        said = self._prompt()
+        self.assertIn("물빠짐", said)
+        self.assertIn("물이 세다", said)
+        self.assertIn("물이 억세다", said)
+
+
+class TestTheScriptIsNotAnAnnouncement(unittest.TestCase):
+    """
+    무엇을 쓸지 밝히고 시작하는 줄이 붙어 올 때가 있다. 그대로 두면 영상이
+    "해린맘 목소리로 스크립트를 써볼게요" 를 읽는다.
+    """
+
+    def test_the_announcing_line_is_dropped(self):
+        cases = [
+            ["해린맘 목소리로 아기 욕조 정수 필터 스크립트를 써볼게요.", "진짜 대본이에요."],
+            ["요청하신 대본을 작성해 드릴게요.", "진짜 대본이에요."],
+            ["Here is the script you asked for.", "The real script."],
+        ]
+        for paragraphs in cases:
+            with self.subTest(first=paragraphs[0][:20]):
+                self.assertEqual(llm._without_preamble(paragraphs), paragraphs[1:])
+
+    def test_a_script_that_merely_mentions_scripts_is_kept(self):
+        """
+        대본 쓰는 사람한테 파는 물건이면 진짜 대본에도 그 말이 나온다. 지우면
+        영상에서 첫 장면이 통째로 사라진다.
+        """
+        cases = [
+            ["대본 쓰는 사람한테 이 마이크가 좋더라구요. 어제 알았어요.", "둘째 문단"],
+            ["어제 대본을 다 날렸어요.", "복구했어요."],
+        ]
+        for paragraphs in cases:
+            with self.subTest(first=paragraphs[0][:20]):
+                self.assertEqual(llm._without_preamble(paragraphs), paragraphs)
+
+    def test_a_single_paragraph_is_never_dropped(self):
+        """
+        한 덩어리로 왔으면 그것이 대본이다. 잘못 보고 지우면 영상에 아무 소리도
+        안 남는다.
+        """
+        only = ["해린맘 목소리로 스크립트를 써볼게요."]
+        self.assertEqual(llm._without_preamble(only), only)
+
+    def test_a_long_first_paragraph_is_kept(self):
+        """
+        앞머리는 짧은 한 줄이다. 길면 대본의 일부로 본다 — 말투만 보고 지우면
+        긴 첫 문단이 통째로 날아간다.
+        """
+        long_first = [
+            "그날 아침에 있었던 일을 대본으로 옮기면 대충 이런 이야기가 되는데, "
+            "끝까지 듣고 나면 제가 왜 그랬는지 아시겠습니다",
+            "둘째",
+        ]
+        self.assertGreater(len(long_first[0]), llm.MAX_PREAMBLE_LENGTH)
+        self.assertEqual(llm._without_preamble(long_first), long_first)
+
+    def test_the_announcing_line_never_reaches_the_script(self):
+        """
+        떼는 함수를 따로 두기만 하고 안 부르면, 영상은 그대로 그 줄을 읽는다.
+        """
+        answer = "해린맘 목소리로 스크립트를 써볼게요.\n\n해린이 목욕물 받아놓고 코를 막더라구요."
+        with patch.object(llm, "_generate_response", return_value=answer):
+            script = llm.generate_script(
+                video_subject="아기 욕조 정수 필터", script_style="product"
+            )
+
+        self.assertNotIn("써볼게요", script)
+        self.assertIn("코를 막더라구요", script)

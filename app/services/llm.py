@@ -243,6 +243,18 @@ If you want to say something is good, say what you noticed doing it, in the
 first person, as an experience. "아침에 안 배고팠음" is an observation. "포만감이
 오래 감" is a claim. Say the first.
 
+Stay inside what your senses registered — what you saw, felt, smelled, heard.
+Never reach for the machinery: how the thing works inside, or a system it does
+not touch. A shower filter changes how the water feels on your hair. It does not
+change the drain, the pipes, or the pressure, and saying it did is the kind of
+sentence a person who used it would never write. When you are not sure whether
+the thing is responsible for something, leave it out; naming what stayed the
+same is stronger anyway.
+
+Writing in Korean, two of these come up constantly and both are wrong: 물빠짐,
+which means drainage, and 물이 세다, which means the pressure is high — neither
+is what hard water does. 물이 억세다 or 석회질이 많다 is the thing people say.
+
 A viewer who buys on an invented claim and finds out is worse than a viewer who
 never watched.
 
@@ -1037,6 +1049,45 @@ def build_script_prompt(
     return prompt
 
 
+# 대본을 내놓기 전에 무엇을 할지 한 줄 붙여 오는 경우가 있다. 스물두 편에 한 번쯤
+# 나왔는데, 그대로 두면 "해린맘 목소리로 스크립트를 써볼게요" 를 영상이 읽는다.
+#
+# 대본 이야기를 한다는 것만으로는 모자란다. 대본 쓰는 사람한테 파는 물건이면 진짜
+# 대본에도 그 말이 나온다. 앞으로 무엇을 하겠다고 읽는 사람에게 알리는 말투까지
+# 함께 봐야 한다 — 우리 화자들은 이미 있었던 일만 말하므로 그렇게 끝내지 않는다.
+_PREAMBLE_WORDS = ("대본", "스크립트", "script")
+_PREAMBLE_ENDINGS = ("게요", "게요.", "겠습니다", "겠습니다.", "드릴게요", "드릴게요.")
+_PREAMBLE_OPENERS = ("here is", "here's", "i'll write", "i will write")
+# 앞머리는 짧은 한 줄이다. 이보다 길면 대본의 일부로 본다.
+MAX_PREAMBLE_LENGTH = 60
+
+
+def _without_preamble(paragraphs: list[str]) -> list[str]:
+    """
+    무엇을 쓸지 밝히고 시작하는 첫 줄을 뗀다.
+
+    뒤에 대본이 따로 있을 때만 뗀다. 한 덩어리로 왔으면 그것이 대본이므로, 잘못
+    보고 지우면 영상에 아무 소리도 안 남는다.
+    """
+    if len(paragraphs) < 2:
+        return paragraphs
+
+    first = paragraphs[0].strip()
+    if len(first) > MAX_PREAMBLE_LENGTH:
+        return paragraphs
+    said = first.lower()
+    if not any(word in said for word in _PREAMBLE_WORDS):
+        return paragraphs
+    announces = first.rstrip().endswith(_PREAMBLE_ENDINGS) or said.startswith(
+        _PREAMBLE_OPENERS
+    )
+    if not announces:
+        return paragraphs
+
+    logger.info("dropped a line that announced the script instead of being it")
+    return paragraphs[1:]
+
+
 def generate_script(
     video_subject: str,
     language: str = "",
@@ -1103,7 +1154,8 @@ def generate_script(
         )
 
         # Split the script into paragraphs
-        paragraphs = response.split("\n\n")
+        paragraphs = [part for part in response.split("\n\n") if part.strip()]
+        paragraphs = _without_preamble(paragraphs)
 
         # Select the specified number of paragraphs
         # selected_paragraphs = paragraphs[:paragraph_number]
