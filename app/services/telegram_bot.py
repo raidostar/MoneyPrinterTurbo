@@ -50,6 +50,9 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # getUpdates 가 한 번에 돌려줄 업데이트 수. 텔레그램 상한은 100 이다.
 MAX_UPDATES_PER_POLL = 20
 MAX_SCRIPT_LENGTH = 3500
+# 한 줄에 넣을 사람 버튼 수. 텔레그램은 한 줄에 넣은 만큼 폭을 나눠 쓰므로, 넷을
+# 넣으면 이름이 잘려 무엇을 고르는지 안 보인다.
+PERSONA_BUTTONS_PER_ROW = 2
 # 하루에 보여 줄 후보 수. 더 늘리면 고르는 일 자체가 일이 된다.
 DAILY_CANDIDATES = 3
 # 매일 후보를 보내는 시각(로컬 24시간). 비워 두면 /오늘 을 직접 칠 때만 돈다.
@@ -452,19 +455,20 @@ class ShortsBot:
 
         token = uuid4().hex[:8]
         self.subjects[token] = subject
-        _send(
-            self.chat_id,
-            f"{subject}\n누구로 쓸까요?",
-            buttons=[
-                [
-                    {
-                        "text": persona.PERSONAS[name].name,
-                        "callback_data": f"persona:{token}:{name}",
-                    }
-                    for name in names
-                ]
-            ],
-        )
+        buttons = [
+            {
+                "text": persona.PERSONAS[name].name,
+                "callback_data": f"persona:{token}:{name}",
+            }
+            for name in names
+        ]
+        # 사람이 늘어도 그대로 한 줄에 밀어 넣으면 이름이 잘려 무엇을 고르는지
+        # 안 보인다. 줄로 나눠 넣는다.
+        rows = [
+            buttons[start : start + PERSONA_BUTTONS_PER_ROW]
+            for start in range(0, len(buttons), PERSONA_BUTTONS_PER_ROW)
+        ]
+        _send(self.chat_id, f"{subject}\n누구로 쓸까요?", buttons=rows)
 
     def _draft_script(self, subject: str, product_persona: str = "") -> None:
         speaker = persona.resolve(product_persona)
