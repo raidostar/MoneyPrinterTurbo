@@ -15,8 +15,8 @@ Claude Code 는 구독으로 쓰는 명령줄 도구다. 사람 없이 도는 �
 않은 채 시험해 보니 파일을 그대로 읽어 왔다.
 
 이름을 하나씩 대서 막지 않는다. 그 목록에 없는 것 — 다음 판에 생기는 도구, 붙여 둔
-MCP 서버, 플러그인 — 이 그대로 열리기 때문이다. 전부 막고, 이 기계의 설정도 이
-호출에는 끌어오지 않는다.
+MCP 서버, 플러그인 — 이 그대로 열리기 때문이다. 이 도구가 문서로 밝힌 "전부 끄기"
+를 쓰고, 이 기계에 얹힌 것(CLAUDE.md, 스킬, 플러그인, 훅, MCP 서버)도 함께 끈다.
 
 Codex 는 여기에 없다. 같은 시험에서 파일을 읽어 왔는데 도구를 끄는 방법을 찾지
 못했다 — ``--sandbox read-only`` 는 쓰기만 막고 읽기와 셸 실행은 그대로 둔다. 더
@@ -33,16 +33,16 @@ TIMEOUT_SECONDS = 300
 # 받아들일 최대 응답 길이(글자). 대본은 수백 자다. 이보다 길면 응답이 아니라
 # 다른 무엇이다.
 MAX_OUTPUT_CHARS = 256 * 1024
-# 도구를 끄는 방법. 이름을 하나씩 대면 그 목록에 없는 것 — 다음 판에 생기는 도구,
-# 사용자가 붙여 둔 MCP 서버, 플러그인 — 이 그대로 열려 있다. 목록을 관리하는 쪽이
-# 아니라 전부 막는 쪽으로 둔다.
+# 도구를 끄는 방법. ``--tools ""`` 는 이 도구가 문서로 밝힌 "전부 끄기" 다. 이름을
+# 하나씩 대는 방식은 쓰지 않는다 — 그 목록에 없는 것이 그대로 열리기 때문이다.
 #
-# ``--allowedTools`` 는 여기에 쓸 수 없다. 자동 승인 목록이지 제한이 아니라서,
-# 없는 이름 하나만 적어 둬도 파일을 그대로 읽어 왔다.
-NO_TOOLS = ("*", "mcp__*")
-# 이 기계에 저장된 설정과 MCP 서버를 이 호출에는 끌어오지 않는다. 도구 이름만
-# 막아 두면 설정 쪽에서 붙은 것이 그대로 남는다.
-NO_SETTINGS = ("--strict-mcp-config", "--setting-sources", "")
+# ``--allowedTools`` 도 쓸 수 없다. 자동 승인 목록이지 제한이 아니라서, 없는 이름
+# 하나만 적어 둔 채로도 파일을 그대로 읽어 왔다.
+NO_TOOLS = ("--tools", "")
+# 이 기계에 얹힌 것도 이 호출에는 끌어오지 않는다. CLAUDE.md, 스킬, 플러그인, 훅,
+# MCP 서버, 사용자 명령이 전부 여기에 해당한다. 도구만 끄면 그쪽으로 붙은 것이
+# 남고, 답이 이 기계의 설정에 따라 달라진다.
+NO_CUSTOMIZATIONS = ("--safe-mode",)
 
 
 def _run(command: list[str], prompt: str) -> str:
@@ -81,9 +81,9 @@ def claude(prompt: str, model_name: str = "") -> str:
     command = ["claude", "-p"]
     if model_name:
         command += ["--model", model_name]
-    command += [*NO_SETTINGS]
+    command += [*NO_CUSTOMIZATIONS]
     # 값을 여러 개 받는 옵션이라, 뒤에 다른 플래그를 두지 않는다.
-    command += ["--disallowedTools", *NO_TOOLS]
+    command += [*NO_TOOLS]
     return _run(command, prompt)
 
 

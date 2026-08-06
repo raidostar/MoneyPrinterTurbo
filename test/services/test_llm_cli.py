@@ -44,18 +44,20 @@ class TestHowItIsCalled(unittest.TestCase):
             llm_cli.claude("프롬프트")
 
         command = ran.call_args.args[0]
-        self.assertIn("--disallowedTools", command)
-        for tool in llm_cli.NO_TOOLS:
-            with self.subTest(tool=tool):
-                self.assertIn(tool, command)
+        # 이 도구가 문서로 밝힌 "전부 끄기" 는 --tools 에 빈 값이다.
+        self.assertEqual(command[command.index("--tools") + 1], "")
 
     def test_the_denial_is_not_a_list_of_names(self):
         """
         이름을 하나씩 대면 그 목록에 없는 것이 열린다 — 다음 판에 생기는 도구,
-        붙여 둔 MCP 서버, 플러그인. 전부 막는 쪽이어야 한다.
+        붙여 둔 MCP 서버, 플러그인. 전부 끄는 쪽이어야 한다.
         """
-        self.assertIn("*", llm_cli.NO_TOOLS)
-        self.assertIn("mcp__*", llm_cli.NO_TOOLS)
+        with patch.object(subprocess, "run", side_effect=_answers()) as ran:
+            llm_cli.claude("프롬프트")
+
+        command = ran.call_args.args[0]
+        self.assertNotIn("--disallowedTools", command)
+        self.assertNotIn("Bash", command)
 
     def test_an_allow_list_is_not_used_to_restrict(self):
         """
@@ -67,28 +69,26 @@ class TestHowItIsCalled(unittest.TestCase):
 
         self.assertNotIn("--allowedTools", ran.call_args.args[0])
 
-    def test_this_machine_settings_are_not_pulled_in(self):
+    def test_what_is_bolted_onto_this_machine_is_not_pulled_in(self):
         """
-        도구 이름만 막아 두면 설정 쪽에서 붙은 MCP 서버가 그대로 남는다.
+        도구만 끄면 CLAUDE.md, 스킬, 플러그인, 훅, MCP 서버가 그대로 남아, 답이
+        이 기계의 설정에 따라 달라진다.
         """
         with patch.object(subprocess, "run", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트")
 
-        command = ran.call_args.args[0]
-        self.assertIn("--strict-mcp-config", command)
-        self.assertEqual(command[command.index("--setting-sources") + 1], "")
+        self.assertIn("--safe-mode", ran.call_args.args[0])
 
-    def test_nothing_follows_the_list_of_tools(self):
+    def test_nothing_follows_the_empty_tool_set(self):
         """
-        값을 여러 개 받는 옵션이다. 뒤에 플래그를 두면 그것까지 도구 이름으로
-        먹혀서, 옵션이 통째로 무시되거나 도구가 열린다.
+        값을 여러 개 받는 옵션이다. 뒤에 플래그를 두면 그것이 도구 이름으로 먹혀서,
+        전부 끄려던 것이 그 하나만 켜 두는 설정이 된다.
         """
         with patch.object(subprocess, "run", side_effect=_answers()) as ran:
             llm_cli.claude("프롬프트", "claude-opus-5")
 
         command = ran.call_args.args[0]
-        after = command[command.index("--disallowedTools") + 1 :]
-        self.assertEqual(sorted(after), sorted(llm_cli.NO_TOOLS))
+        self.assertEqual(command[command.index("--tools") :], ["--tools", ""])
 
     def test_it_does_not_wait_forever(self):
         for name, runner in llm_cli.RUNNERS.items():
