@@ -184,6 +184,48 @@ class TestHowItIsCalled(unittest.TestCase):
         self.assertEqual(command[command.index("--model") + 1], "claude-opus-5")
 
 
+class TestWhichModelAnswers(unittest.TestCase):
+    """
+    정하지 않으면 이 도구는 제일 큰 모델로 답한다. 쇼츠 대본 한 편에 그것까지 쓸
+    이유가 없고, 그만큼 구독 사용량이 빨리 준다.
+    """
+
+    def _spec(self):
+        from app.models.llm_provider import get_llm_provider
+
+        return get_llm_provider("claude_cli")
+
+    def test_the_model_we_measured_is_the_one_that_runs(self):
+        """
+        비워 두면 도구가 제일 큰 모델로 답한다. 더 작은 모델은 이 프롬프트를 다
+        지키지 못했다 — 한 대본 안에서 여행을 두 번 가고, 쓰지 말라고 적어 둔 말이
+        그대로 나왔다. 재 보고 고른 값이라, 바뀌면 여기서 걸려야 한다.
+        """
+        self.assertEqual(self._spec().resolve_model_name(""), "sonnet")
+
+    def test_the_chosen_model_reaches_the_tool(self):
+        """
+        고르기만 하고 안 넘기면 도구의 기본값으로 돈다. 설정에 적어 둔 것이 있으면
+        그쪽이 이겨야 한다 — 재 본 값이 기본일 뿐이고, 바꿔 쓸 수 있어야 한다.
+        """
+        from app.config import config
+        from app.services import llm
+
+        for configured, expected in (("", "sonnet"), ("opus", "opus")):
+            with self.subTest(configured=configured or "(none)"):
+                settings = {"llm_provider": "claude_cli"}
+                if configured:
+                    settings["claude_cli_model_name"] = configured
+                with patch.dict(config.app, settings):
+                    with patch.object(
+                        subprocess, "Popen", side_effect=_answers()
+                    ) as ran:
+                        llm._generate_response("프롬프트")
+
+                command = ran.call_args.args[0]
+                self.assertEqual(command[command.index("--model") + 1], expected)
+
+
 class TestReadingTheAnswer(unittest.TestCase):
     def test_the_answer_comes_back_trimmed(self):
         with patch.object(subprocess, "Popen", side_effect=_answers("  대본  \n")):
