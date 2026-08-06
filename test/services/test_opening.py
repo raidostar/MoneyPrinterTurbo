@@ -1,5 +1,6 @@
 """첫 화면에 올 클립 고르기."""
 
+import pathlib
 import unittest
 from unittest.mock import patch
 
@@ -73,9 +74,9 @@ class TestChoosing(unittest.TestCase):
         for source in self.sources:
             self.assertIn(opening.describe(source["source_page"]), seen["p"])
 
-    def test_an_answer_with_words_around_it_still_works(self):
-        """숫자만 답하라고 해도 문장이나 JSON 으로 감싸 온다."""
-        for answer in ("1", " 1 ", "Index: 1", "```json\n1\n```", '"1"'):
+    def test_an_answer_wrapped_but_still_just_a_number_works(self):
+        """숫자만 답하라고 해도 코드 울타리나 따옴표로 감싸 온다."""
+        for answer in ("1", " 1 ", "```json\n1\n```", '"1"', "```\n1\n```"):
             with self.subTest(answer=answer):
                 self.assertEqual(
                     opening.pick("첫 문장", self.sources, lambda prompt: answer),
@@ -98,6 +99,12 @@ class TestChoosing(unittest.TestCase):
             "Error: 1 request failed",
             "Error: 429 too many requests",
             None,
+            # 글 안에서 숫자를 찾아내면 고르지 못했다는 말과 다른 것을 고른 말이
+            # 둘 다 엉뚱한 선택이 된다.
+            "0번과 1번 중에 못 고르겠어요",
+            "clip 1 is unsuitable; choose 2",
+            "Index: 1",
+            "1 and 2 both work",
         ):
             with self.subTest(answer=answer):
                 self.assertEqual(
@@ -198,6 +205,29 @@ class TestPuttingItFirst(unittest.TestCase):
         ordered = self._first("baby.mp4")
         self.assertEqual(sorted(ordered), sorted(self.paths))
 
+    def test_the_record_shows_the_order_that_was_rendered(self):
+        """
+        기록에는 실제로 쓰인 값이 남아야 한다. 재생 순서만 바꾸고 기록을 그대로
+        두면, 그 영상이 어떻게 만들어졌는지 되짚을 때 첫 화면부터 틀린다.
+        """
+        with patch.object(self.material.opening, "pick", return_value="baby.mp4"):
+            ordered = self.material._opening_first(
+                list(self.paths), self.sources, "물에서 나오는데"
+            )
+
+        self.assertEqual(self.sources[0]["local_file"], "baby.mp4")
+        self.assertEqual(
+            [source["local_file"] for source in self.sources],
+            [pathlib.Path(path).name for path in ordered],
+        )
+
+    def test_the_record_is_left_alone_when_nothing_moves(self):
+        before = [source["local_file"] for source in self.sources]
+        with patch.object(self.material.opening, "pick", return_value=""):
+            self.material._opening_first(list(self.paths), self.sources, "첫 문장")
+
+        self.assertEqual([s["local_file"] for s in self.sources], before)
+
     def test_no_choice_keeps_the_order(self):
         self.assertEqual(self._first(""), self.paths)
 
@@ -218,6 +248,49 @@ class TestPuttingItFirst(unittest.TestCase):
         with patch.object(self.material.opening, "pick") as pick:
             self.material._opening_first(list(self.paths), self.sources, "")
         pick.assert_not_called()
+
+
+class TestWhatGetsWrittenDown(unittest.TestCase):
+    """기록에는 실제로 만들어진 순서가 남아야 한다."""
+
+    def test_the_record_is_written_after_the_opening_moves(self):
+        """
+        먼저 남기면 기록에는 내려받은 순서가 남고, 실제로 만들어진 영상은 다른
+        순서가 된다. 그러면 그 영상이 어떻게 나왔는지 되짚을 때 첫 화면부터 틀린다.
+        """
+        from app.services import material
+
+        written = []
+        sources = [
+            _source("empty.mp4", "a-luxury-golden-pool"),
+            _source("baby.mp4", "child-on-a-bed"),
+        ]
+        paths = ["/m/empty.mp4", "/m/baby.mp4"]
+
+        with (
+            patch.object(
+                material,
+                "_persist_material_sources",
+                side_effect=lambda task_id, records: written.append(
+                    [record["local_file"] for record in records]
+                ),
+            ),
+            patch.object(material.opening, "pick", return_value="baby.mp4"),
+            patch.object(
+                material,
+                "_download_videos_by_script_order",
+                return_value=(list(paths), sources),
+            ),
+        ):
+            ordered = material.download_videos(
+                task_id="t",
+                search_terms=["baby"],
+                match_script_order=True,
+                opening_line="물에서 나오는데",
+            )
+
+        self.assertEqual(ordered[0], "/m/baby.mp4")
+        self.assertEqual(written, [["baby.mp4", "empty.mp4"]])
 
 
 class TestWhichLineToMatch(unittest.TestCase):
@@ -324,6 +397,33 @@ class TestUntrustedText(unittest.TestCase):
                 "첫 문장",
                 [_source("a.mp4", "a-pool"), _source("b.mp4", "a-child")],
                 lambda prompt: flood,
+            ),
+            "",
+        )
+
+    def test_a_number_that_is_not_text_is_refused(self):
+        """
+        글이 온다고 정해 둔 자리다. 숫자가 그대로 오면 형식 검사를 통과해 버리므로,
+        무엇이 잘못됐는지 모른 채 지나간다.
+        """
+        with patch.object(opening.logger, "warning") as warned:
+            self.assertEqual(
+                opening.pick(
+                    "첫 문장",
+                    [_source("a.mp4", "a-pool"), _source("b.mp4", "a-child")],
+                    lambda prompt: 1,
+                ),
+                "",
+            )
+        self.assertIn("not text", " ".join(str(c.args[0]) for c in warned.call_args_list))
+
+    def test_a_wall_of_digits_is_refused(self):
+        """숫자만 오면 형식은 맞다. 길이까지 안 보면 그대로 정수로 만든다."""
+        self.assertEqual(
+            opening.pick(
+                "첫 문장",
+                [_source("a.mp4", "a-pool"), _source("b.mp4", "a-child")],
+                lambda prompt: "1" * 5000,
             ),
             "",
         )

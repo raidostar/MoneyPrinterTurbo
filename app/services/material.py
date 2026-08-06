@@ -795,12 +795,27 @@ def _opening_first(
         if Path(path).name == chosen:
             if index:
                 video_paths.insert(0, video_paths.pop(index))
+                _move_source_first(material_sources, chosen)
             return video_paths
 
     # 고른 이름이 받은 파일에 없다. 기록과 파일이 어긋난 것이므로 순서를 건드리지
     # 않고 남긴다 — 조용히 넘어가면 다음에 같은 일이 나도 알 수 없다.
     logger.warning("the chosen opening clip is not among the downloaded files")
     return video_paths
+
+
+def _move_source_first(material_sources: list[dict[str, Any]], name: str) -> None:
+    """
+    출처 기록도 같은 순서로 맞춘다.
+
+    기록에는 실제로 쓰인 값이 남아야 한다. 재생 순서만 바꾸고 기록을 그대로 두면,
+    나중에 그 영상이 어떤 소재로 어떻게 만들어졌는지 되짚을 때 첫 화면부터 틀린다.
+    """
+    for index, source in enumerate(material_sources):
+        if isinstance(source, dict) and source.get("local_file") == name:
+            if index:
+                material_sources.insert(0, material_sources.pop(index))
+            return
 
 
 def download_videos(
@@ -852,7 +867,11 @@ def download_videos(
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
         )
-        return _opening_first(ordered, ordered_sources, opening_line)
+        ordered = _opening_first(ordered, ordered_sources, opening_line)
+        # 첫 화면을 앞으로 옮긴 뒤에 남긴다. 먼저 남기면 기록에는 내려받은 순서가
+        # 남고, 실제로 만들어진 영상은 다른 순서가 된다.
+        _persist_material_sources(task_id, ordered_sources)
+        return ordered
 
     valid_video_items = []
     valid_video_urls = []
@@ -922,8 +941,9 @@ def download_videos(
                 f"detail={_redact_request_error(e, item.url)}"
             )
     logger.success(f"downloaded {len(video_paths)} videos")
+    video_paths = _opening_first(video_paths, material_sources, opening_line)
     _persist_material_sources(task_id, material_sources)
-    return _opening_first(video_paths, material_sources, opening_line)
+    return video_paths
 
 
 def _download_videos_by_script_order(
@@ -1029,7 +1049,8 @@ def _download_videos_by_script_order(
         candidate_index += 1
 
     logger.success(f"downloaded {len(video_paths)} ordered videos")
-    _persist_material_sources(task_id, material_sources)
+    # 남기는 것은 부르는 쪽이 한다. 첫 화면을 앞으로 옮긴 뒤에 남겨야 기록과 영상이
+    # 같은 순서가 된다.
     return video_paths, material_sources
 
 

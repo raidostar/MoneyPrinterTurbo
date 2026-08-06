@@ -160,18 +160,22 @@ def _parse_index(answer, limit: int) -> int | None:
         return None
 
     text = str(answer or "").strip()[:MAX_ANSWER_LENGTH]
-    if text.startswith("Error: "):
-        logger.warning("could not choose an opening clip: provider error")
-        return None
+    # 숫자만 답하라고 해도 코드 울타리나 따옴표로 감싸 온다. 벗겨서 보되, 벗긴
+    # 뒤에도 번호 하나여야 한다.
+    text = re.sub(r"^```(?:json)?|```$", "", text).strip()
     try:
-        text = str(json.loads(text))
+        unwrapped = json.loads(text)
     except (ValueError, TypeError):
-        pass
+        unwrapped = None
+    if isinstance(unwrapped, (int, str)) and not isinstance(unwrapped, bool):
+        text = str(unwrapped).strip()
 
-    # 부호까지 읽는다. "-1" 에서 숫자만 떼면 1번을 고른 것이 되어, 못 골랐다는
-    # 답이 멀쩡한 선택으로 바뀐다.
-    match = re.search(r"-?\d+", text)
-    if not match:
+    # 글 안에서 숫자를 찾아내지 않는다. "0번과 1번 중에 못 고르겠다" 나 "1번은
+    # 안 맞으니 2번" 같은 답에서 첫 숫자를 떼면, 고르지 못했다는 말과 다른 것을
+    # 고른 말이 둘 다 엉뚱한 선택이 된다. 번호 하나만 온 답이어야 답이다.
+    #
+    # 부호도 함께 읽는다. "-1" 에서 숫자만 떼면 1번을 고른 것이 된다.
+    if not re.fullmatch(r"[-+]?\d+", text):
         return None
-    index = int(match.group())
+    index = int(text)
     return index if 0 <= index < limit else None
