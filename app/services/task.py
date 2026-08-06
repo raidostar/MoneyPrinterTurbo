@@ -635,7 +635,9 @@ def _opening_line(script: str) -> str:
     return first.strip()[:200]
 
 
-def get_video_materials(task_id, params, video_terms, audio_duration):
+def get_video_materials(
+    task_id, params, video_terms, audio_duration, video_script=""
+):
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -667,7 +669,7 @@ def get_video_materials(task_id, params, video_terms, audio_duration):
             audio_duration=audio_duration * params.video_count,
             max_clip_duration=params.video_clip_duration,
             match_script_order=params.match_materials_to_script,
-            opening_line=_opening_line(params.video_script),
+            opening_line=_opening_line(video_script or params.video_script),
         )
         if not downloaded_videos:
             _mark_task_failed(
@@ -1254,8 +1256,10 @@ def _run_pipeline(
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
     # 5. Get video materials
+    # 대본을 여기로 함께 넘긴다. 주제만 받아 여기서 만든 경우 params 쪽은 비어
+    # 있어서, 그것만 보면 첫 화면을 고를 문장이 없다.
     downloaded_videos = get_video_materials(
-        task_id, params, video_terms, audio_duration
+        task_id, params, video_terms, audio_duration, video_script
     )
     if not downloaded_videos:
         return _mark_task_failed(

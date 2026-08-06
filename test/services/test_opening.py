@@ -9,6 +9,19 @@ from app.services import opening
 PEXELS = "https://www.pexels.com/video/{slug}-{asset}/"
 
 
+class _MemoryState:
+    """작업 상태를 메모리에만 담는다. 시험이 Redis 나 파일에 손대지 않게."""
+
+    def __init__(self):
+        self.tasks = {}
+
+    def update_task(self, task_id, **kwargs):
+        self.tasks.setdefault(task_id, {}).update(kwargs)
+
+    def get_task(self, task_id):
+        return self.tasks.get(task_id)
+
+
 def _source(name, slug, asset="1234567"):
     return {
         "local_file": name,
@@ -291,6 +304,59 @@ class TestWhatGetsWrittenDown(unittest.TestCase):
 
         self.assertEqual(ordered[0], "/m/baby.mp4")
         self.assertEqual(written, [["baby.mp4", "empty.mp4"]])
+
+
+class TestTheScriptWeActuallyUsed(unittest.TestCase):
+    def test_a_script_made_here_still_decides_the_opening(self):
+        """
+        주제만 받으면 params 의 대본 칸은 비어 있고, 대본은 여기서 만들어진다.
+        그것만 보면 첫 화면을 고를 문장이 없어 기능이 통째로 아무 일도 안 한다.
+        """
+        from app.models.schema import VideoParams
+        from app.services import task
+
+        params = VideoParams(video_subject="아기 방수기저귀", video_script="")
+        with patch.object(task.material, "download_videos", return_value=["/m/a.mp4"]) as download:
+            task.get_video_materials(
+                "t", params, ["baby"], 30.0, "물에서 나오는데요. 다음 문장이에요."
+            )
+
+        self.assertEqual(
+            download.call_args.kwargs["opening_line"], "물에서 나오는데요."
+        )
+
+    def test_a_script_handed_in_is_used_when_none_is_passed(self):
+        from app.models.schema import VideoParams
+        from app.services import task
+
+        params = VideoParams(video_subject="주제", video_script="내가 쓴 첫 문장.")
+        with patch.object(task.material, "download_videos", return_value=["/m/a.mp4"]) as download:
+            task.get_video_materials("t", params, ["baby"], 30.0)
+
+        self.assertEqual(download.call_args.kwargs["opening_line"], "내가 쓴 첫 문장.")
+
+
+    def test_the_pipeline_hands_the_script_it_made_to_the_materials(self):
+        """
+        여기서 만든 대본을 소재 고르는 쪽에 안 넘기면, 그쪽은 빈 칸만 보고 첫
+        화면을 고르지 않는다. 두 함수 다 맞게 고쳐도 사이가 끊기면 소용없다.
+        """
+        from app.models.schema import VideoParams
+        from app.services import task
+
+        params = VideoParams(video_subject="아기 방수기저귀", video_script="")
+        with (
+            patch.object(task, "generate_script", return_value="여기서 만든 대본."),
+            patch.object(task, "generate_terms", return_value=["baby"]),
+            patch.object(task, "save_script_data"),
+            patch.object(task, "generate_audio", return_value=("/a.mp3", "", 30.0)),
+            patch.object(task, "generate_subtitle", return_value=""),
+            patch.object(task, "get_video_materials", return_value=None) as materials,
+            patch.object(task.sm, "state", _MemoryState()),
+        ):
+            task.start("opening-plumbing", params)
+
+        self.assertEqual(materials.call_args.args[4], "여기서 만든 대본.")
 
 
 class TestWhichLineToMatch(unittest.TestCase):
