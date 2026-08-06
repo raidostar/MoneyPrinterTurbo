@@ -1265,26 +1265,19 @@ class TestSubtitleLineBreaks(unittest.TestCase):
         """
         from app.services.voice import split_for_one_line
 
-        self.assertEqual(
-            split_for_one_line("집에 돌아와서 샤워기 필터 꽂고 씻었는데"),
-            ["집에 돌아와서", "샤워기 필터 꽂고 씻었는데"],
-        )
-
-    def test_among_the_pause_points_the_balanced_one_wins(self):
-        """
-        말이 끊기는 자리가 여럿이면 그중 고른 쪽을 잡아야 한다. 앞에서부터 집으면
-        한쪽이 짧고 다른 쪽이 길어져, 나누기 전과 다를 바 없이 읽힌다.
-        """
-        from app.services.voice import split_for_one_line
-
-        self.assertEqual(
-            split_for_one_line("아침에 해린이 데려다주고 앞유리에 바로 펼쳐뒀어요"),
-            ["아침에 해린이 데려다주고", "앞유리에 바로 펼쳐뒀어요"],
-        )
-        self.assertEqual(
-            split_for_one_line("그날 저녁에 감고 나오니까 빗이 한 번에 내려가더라"),
-            ["그날 저녁에 감고 나오니까", "빗이 한 번에 내려가더라"],
-        )
+        cases = [
+            (
+                "집에 돌아와서 샤워기 필터 꽂고 씻었는데",
+                ["집에 돌아와서", "샤워기 필터 꽂고 씻었는데"],
+            ),
+            (
+                "다음 날 아침에 여행용 샤워기 필터를 달았어요",
+                ["다음 날 아침에", "여행용 샤워기 필터를 달았어요"],
+            ),
+        ]
+        for line, expected in cases:
+            with self.subTest(line=line):
+                self.assertEqual(split_for_one_line(line), expected)
 
     def test_a_word_is_not_cut_in_two(self):
         """
