@@ -23,6 +23,8 @@ Codex 는 여기에 없다. 같은 시험에서 파일을 읽어 왔는데 도�
 빠르지만, 막을 수 없는 것을 넣어 둘 자리는 아니다.
 """
 
+import os
+import signal
 import subprocess
 import tempfile
 import threading
@@ -34,6 +36,8 @@ TIMEOUT_SECONDS = 300
 # 받아들일 최대 응답 길이(글자). 대본은 수백 자다. 이보다 길면 응답이 아니라
 # 다른 무엇이다.
 MAX_OUTPUT_CHARS = 256 * 1024
+# 죽인 프로세스를 거둘 때 기다릴 시간.
+REAP_SECONDS = 5
 # 도구를 끄는 방법. ``--tools ""`` 는 이 도구가 문서로 밝힌 "전부 끄기" 다. 이름을
 # 하나씩 대는 방식은 쓰지 않는다 — 그 목록에 없는 것이 그대로 열리기 때문이다.
 #
@@ -63,6 +67,9 @@ def _run(command: list[str], prompt: str) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            # 제 밑으로 또 프로세스를 만드는 도구다. 세션을 따로 열어 두면 끝낼 때
+            # 그 무리를 통째로 보낼 수 있다.
+            start_new_session=True,
             # 이 도구는 도는 자리의 설정 파일을 읽는다. 작업 디렉터리를 넘겨받은
             # 곳으로 두면 그쪽 설정까지 따라가므로, 부르는 자리를 고정한다.
             cwd=tempfile.gettempdir(),
@@ -84,24 +91,54 @@ def _run(command: list[str], prompt: str) -> str:
 
     reader = threading.Thread(target=read_bounded, daemon=True)
     reader.start()
-    reader.join(TIMEOUT_SECONDS)
-    if reader.is_alive():
-        process.kill()
-        raise ValueError(f"{command[0]} did not answer in time")
+    try:
+        reader.join(TIMEOUT_SECONDS)
+        if reader.is_alive():
+            raise ValueError(f"{command[0]} did not answer in time")
 
-    said = answer[0] if answer else ""
-    if len(said) > MAX_OUTPUT_CHARS:
-        process.kill()
-        raise ValueError(f"{command[0]} answered with too much text")
+        said = answer[0] if answer else ""
+        if len(said) > MAX_OUTPUT_CHARS:
+            raise ValueError(f"{command[0]} answered with too much text")
 
-    if process.wait(timeout=TIMEOUT_SECONDS) != 0:
-        # 도구가 뱉은 말은 어디에도 옮기지 않는다 — 사용자 화면에도, 로그에도.
-        # 인증 토큰과 설정 경로가 섞여 나오고, 로그는 나중에 통째로 공유된다.
-        # 무엇이 일어났는지 짚는 데는 이름과 종료 코드로 충분하다.
-        logger.warning(f"{command[0]} exited with {process.returncode}")
-        raise ValueError(f"{command[0]} failed")
+        try:
+            code = process.wait(timeout=TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            # 말은 끝냈는데 안 죽는 경우다. 답을 받았어도 기다려 줄 수는 없다.
+            raise ValueError(f"{command[0]} did not finish") from None
+        if code != 0:
+            # 도구가 뱉은 말은 어디에도 옮기지 않는다 — 사용자 화면에도, 로그에도.
+            # 인증 토큰과 설정 경로가 섞여 나오고, 로그는 나중에 통째로 공유된다.
+            # 무엇이 일어났는지 짚는 데는 이름과 종료 코드로 충분하다.
+            logger.warning(f"{command[0]} exited with {code}")
+            raise ValueError(f"{command[0]} failed")
 
-    return said.strip()
+        return said.strip()
+    finally:
+        _reap(process)
+
+
+def _reap(process) -> None:
+    """
+    남은 프로세스를 정리한다.
+
+    죽이고 거두지 않으면 좀비가 남는다. 이 봇은 몇 달씩 도는 프로세스라, 영상 한
+    편마다 하나씩 쌓이면 결국 프로세스를 더 못 만든다.
+
+    이 도구는 제 밑으로 또 프로세스를 만든다. 앞에서 세션을 따로 열어 두었으므로,
+    그 무리를 통째로 보낸다 — 부모만 죽이면 자식이 남는다.
+    """
+    if process.poll() is None:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except (OSError, ProcessLookupError):
+            pass
+    try:
+        process.wait(timeout=REAP_SECONDS)
+    except (subprocess.TimeoutExpired, OSError):
+        logger.warning(f"{process.args[0]} did not go away")
 
 
 def claude(prompt: str, model_name: str = "") -> str:

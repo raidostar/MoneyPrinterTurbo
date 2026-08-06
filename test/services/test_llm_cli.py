@@ -26,11 +26,15 @@ class _Pipe:
 class _FakeProcess:
     """도구인 척한다. read(n) 은 진짜처럼 n 글자까지만 돌려준다."""
 
-    def __init__(self, text="답", returncode=0, endless=False):
+    def __init__(self, text="답", returncode=0, endless=False, alive=False):
         self.text = text
         self.returncode = returncode
         self.endless = endless
+        self.alive = alive
+        self.args = ["claude"]
+        self.pid = 4242
         self.killed = False
+        self.waits = 0
         self.read_sizes = []
         self.stdin = _Pipe()
         self.stdout = self
@@ -41,16 +45,23 @@ class _FakeProcess:
 
     def kill(self):
         self.killed = True
+        self.alive = False
+
+    def poll(self):
+        return None if self.alive else self.returncode
 
     def wait(self, timeout=None):
+        self.waits += 1
+        if self.alive:
+            raise subprocess.TimeoutExpired("claude", timeout or 0)
         return self.returncode
 
 
-def _answers(text="답", returncode=0, endless=False):
+def _answers(text="답", returncode=0, endless=False, alive=False):
     made = []
 
     def open_process(command, **kwargs):
-        made.append(_FakeProcess(text, returncode, endless))
+        made.append(_FakeProcess(text, returncode, endless, alive))
         return made[-1]
 
     open_process.made = made
@@ -133,14 +144,15 @@ class TestHowItIsCalled(unittest.TestCase):
 
     def test_it_does_not_wait_forever(self):
         """읽기가 안 끝나면 기다리기를 그만두고 도구를 죽인다."""
-        opener = _answers()
+        opener = _answers(alive=True)
         with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
             with patch.object(subprocess, "Popen", side_effect=opener):
                 with patch.object(_FakeProcess, "read", lambda self, n: time.sleep(30)):
-                    with self.assertRaises(ValueError):
-                        llm_cli.claude("프롬프트")
+                    with patch.object(llm_cli.os, "killpg") as killed:
+                        with self.assertRaises(ValueError):
+                            llm_cli.claude("프롬프트")
 
-        self.assertTrue(opener.made[0].killed)
+        killed.assert_called_once()
 
     def test_it_runs_somewhere_neutral(self):
         """
@@ -182,15 +194,19 @@ class TestReadingTheAnswer(unittest.TestCase):
         다 받아 놓고 길이를 재면, 끝없이 뱉는 도구 하나가 이 프로세스의 메모리를
         먼저 채운다. 상한까지만 읽고 거기서 끊어야 한다.
         """
-        opener = _answers(endless=True)
+        # 쏟아내는 중이니 아직 살아 있다.
+        opener = _answers(endless=True, alive=True)
         with patch.object(subprocess, "Popen", side_effect=opener):
-            with self.assertRaises(ValueError):
-                llm_cli.claude("프롬프트")
+            with patch.object(llm_cli.os, "killpg") as killed:
+                with self.assertRaises(ValueError) as caught:
+                    llm_cli.claude("프롬프트")
 
+        # 왜 그만뒀는지가 중요하다. 다른 이유로 실패해도 시험은 통과해 버린다.
+        self.assertIn("too much text", str(caught.exception))
         process = opener.made[0]
         # 읽은 양이 상한을 한 글자만 넘는다. 판정에 필요한 최소한이다.
         self.assertEqual(process.read_sizes, [llm_cli.MAX_OUTPUT_CHARS + 1])
-        self.assertTrue(process.killed)
+        killed.assert_called_once()
 
     def test_the_tool_never_writes_into_our_error_channel(self):
         """받아만 두고 안 읽으면 그쪽 관이 차서 도구가 멈춘 채로 시간만 흐른다."""
@@ -208,7 +224,7 @@ class TestWhenItGoesWrong(unittest.TestCase):
         self.assertIn("not installed", str(caught.exception))
 
     def test_a_tool_that_never_answers_is_not_waited_on_forever(self):
-        opener = _answers()
+        opener = _answers(alive=True)
 
         def never_returns(self, size):
             time.sleep(30)
@@ -217,12 +233,13 @@ class TestWhenItGoesWrong(unittest.TestCase):
         with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
             with patch.object(subprocess, "Popen", side_effect=opener):
                 with patch.object(_FakeProcess, "read", never_returns):
-                    with self.assertRaises(ValueError) as caught:
-                        llm_cli.claude("프롬프트")
+                    with patch.object(llm_cli.os, "killpg") as killed:
+                        with self.assertRaises(ValueError) as caught:
+                            llm_cli.claude("프롬프트")
 
         self.assertIn("in time", str(caught.exception))
         # 기다리다 만 도구를 그대로 두면 프로세스가 쌓인다.
-        self.assertTrue(opener.made[0].killed)
+        killed.assert_called_once()
 
     def test_what_the_tool_printed_is_not_handed_to_the_user(self):
         """
@@ -242,6 +259,43 @@ class TestWhenItGoesWrong(unittest.TestCase):
         # 무엇이 일어났는지는 여전히 알 수 있어야 한다.
         self.assertIn("claude", said)
         self.assertIn("1", said)
+
+    def test_the_process_is_always_reaped(self):
+        """
+        죽이고 거두지 않으면 좀비가 남는다. 이 봇은 몇 달씩 도는 프로세스라, 영상
+        한 편마다 하나씩 쌓이면 결국 프로세스를 더 못 만든다.
+        """
+        opener = _answers()
+        with patch.object(subprocess, "Popen", side_effect=opener):
+            llm_cli.claude("프롬프트")
+
+        self.assertGreaterEqual(opener.made[0].waits, 1)
+
+    def test_a_tool_that_will_not_die_is_killed_and_reaped(self):
+        """
+        말은 끝냈는데 안 죽는 경우다. 답을 받았어도 기다려 줄 수는 없고, 그대로
+        두면 남는다.
+        """
+        opener = _answers(alive=True)
+        with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
+            with patch.object(subprocess, "Popen", side_effect=opener):
+                with patch.object(llm_cli.os, "killpg") as killed:
+                    with self.assertRaises(ValueError) as caught:
+                        llm_cli.claude("프롬프트")
+
+        self.assertIn("did not finish", str(caught.exception))
+        killed.assert_called_once()
+
+    def test_the_whole_group_goes_and_not_just_the_parent(self):
+        """이 도구는 제 밑으로 또 프로세스를 만든다. 부모만 죽이면 자식이 남는다."""
+        opener = _answers(alive=True)
+        with patch.object(llm_cli, "TIMEOUT_SECONDS", 0.2):
+            with patch.object(subprocess, "Popen", side_effect=opener) as ran:
+                with patch.object(llm_cli.os, "killpg"):
+                    with self.assertRaises(ValueError):
+                        llm_cli.claude("프롬프트")
+
+        self.assertTrue(ran.call_args.kwargs["start_new_session"])
 
     def test_an_unknown_name_runs_nothing(self):
         """
