@@ -131,6 +131,9 @@ PERSONAS = {
     ),
 }
 DEFAULT_PERSONA = "haerinmom"
+# 이름에 쓸 수 있는 길이. 기록과 요청을 오가는 값이라 VideoParams.product_persona
+# 상한과 같아야 하고, 텔레그램 버튼의 callback_data(64바이트) 에도 들어가야 한다.
+MAX_KEY_LENGTH = 32
 
 
 def resolve(name: str) -> Persona | None:

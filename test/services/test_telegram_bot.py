@@ -1124,9 +1124,18 @@ class TestPersonaPicker(unittest.TestCase):
         """
         callback_data 가 64바이트를 넘으면 메시지 자체가 거부된다 — 버튼이 아예
         안 나오고 주제만 남아, 눌러 볼 것이 없다.
+
+        지금 등록된 이름만 재면 짧아서 늘 통과한다. 이름에 허용된 최대 길이로
+        재야 나중에 긴 이름을 넣었을 때 여기서 걸린다.
         """
+        longest = "a" * bot.persona.MAX_KEY_LENGTH
+        crowd = {
+            longest: replace(bot.persona.PERSONAS["haerinmom"], key=longest),
+            "kimbujang": bot.persona.PERSONAS["kimbujang"],
+        }
         shorts = self._bot()
         with (
+            patch.dict(bot.persona.PERSONAS, crowd, clear=True),
             patch.object(shorts, "_draft_script"),
             patch.object(bot, "_send") as send,
         ):
