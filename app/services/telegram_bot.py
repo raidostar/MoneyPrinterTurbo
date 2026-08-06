@@ -214,6 +214,11 @@ def _build_params(subject: str, script: str, product_persona: str = "") -> Video
         subtitle_below_color=str(
             saved.get("subtitle_below_color", "#111111") or "#111111"
         ),
+        # 쇼츠는 피드에서 이미 재생된 채로 뜬다. 시청자가 하는 결정은 볼지 말지가
+        # 아니라 넘길지 말지고, 그 판단은 첫 한두 초에 끝난다. 소재를 섞으면 그
+        # 자리에 아무 그림이나 오므로 — 첫 문장이 "물에서 나오는데" 인데 화면은
+        # 사람 없는 빈 수영장이 나온 적이 있다 — 대본 순서대로 붙인다.
+        match_materials_to_script=True,
         # 대본을 여기서 만들어 넘기므로, 누구로 썼는지도 함께 보낸다. 안 보내면
         # 기록에 아무도 안 남아 그 대본이 어떻게 나왔는지 되짚을 수 없다.
         script_style="product" if product_persona else "informative",

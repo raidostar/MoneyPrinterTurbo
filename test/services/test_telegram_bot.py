@@ -1304,6 +1304,16 @@ class TestPersonaPicker(unittest.TestCase):
 
                 self.assertEqual(params.voice_name, expected)
 
+    def test_the_clips_follow_the_script(self):
+        """
+        쇼츠는 피드에서 이미 재생된 채로 뜬다. 시청자는 볼지 말지가 아니라 넘길지
+        말지를 첫 한두 초에 정하는데, 소재를 섞으면 그 자리에 아무 그림이나 온다 —
+        첫 문장이 "물에서 나오는데" 인데 사람 없는 빈 수영장이 나온 적이 있다.
+        """
+        params = bot._build_params("아기 방수기저귀", "대본", "haerinmom")
+
+        self.assertTrue(params.match_materials_to_script)
+
     def test_the_params_carry_the_person(self):
         params = bot._build_params("골프 거리측정기", "대본", "kimbujang")
 
