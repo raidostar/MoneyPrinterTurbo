@@ -280,8 +280,10 @@ def generate_script(task_id, params):
 
     video_script = params.video_script.strip()
     if video_script:
-        # 이미 대본이 있으면 여기서 만들지 않으므로 여는 방식은 쓰이지 않는다.
+        # 이미 대본이 있으면 여기서 만들지 않으므로 여는 방식도 끝내는 법도
+        # 쓰이지 않는다.
         params.product_voice = ""
+        params.product_ending = ""
         # 화자는 다르다. 대본을 만들어 넘긴 쪽(화면, 봇)이 누구로 썼는지 함께
         # 알려 주면 그 대본은 그 사람이 쓴 것이고, 기록에 남아야 되짚을 수 있다.
         #
@@ -308,6 +310,9 @@ def generate_script(task_id, params):
             params.product_voice = llm.resolve_product_voice(
                 params.product_voice or llm.pick_product_voice()
             )
+            params.product_ending = llm.resolve_product_ending(
+                params.product_ending or llm.pick_product_ending()
+            )
             # 고르는 규칙은 화면 쪽과 같은 함수를 쓴다. 여기서 따로 정하면 기록에
             # 남는 이름과 실제로 쓰인 사람이 갈린다.
             params.product_persona = persona_service.key_for(
@@ -315,10 +320,12 @@ def generate_script(task_id, params):
             )
             logger.info(
                 f"product voice: {params.product_voice}, "
+                f"ending: {params.product_ending}, "
                 f"persona: {params.product_persona or '(none)'}"
             )
         else:
             params.product_voice = ""
+            params.product_ending = ""
             params.product_persona = ""
 
         video_script = llm.generate_script(
@@ -329,6 +336,7 @@ def generate_script(task_id, params):
             custom_system_prompt=params.custom_system_prompt,
             script_style=params.script_style,
             product_voice=params.product_voice,
+            product_ending=params.product_ending,
             product_persona=params.product_persona,
         )
     else:

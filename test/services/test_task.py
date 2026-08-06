@@ -89,6 +89,7 @@ class TestTaskService(unittest.TestCase):
             custom_system_prompt="Only write short narration.",
             script_style="story",
             product_voice="",
+            product_ending="",
             product_persona="",
         )
 

@@ -654,19 +654,34 @@ class TestClosingLine(unittest.TestCase):
     끝났고, 그 말은 한국어에서 쓰지 않는 표현이었다.
     """
 
-    def test_the_stale_phrase_is_banned(self):
-        self.assertIn("never write\n   자리값", llm.script_style_prompt("product"))
+    def _prompt(self):
+        """
+        줄바꿈을 지운 프롬프트. 문단을 다시 감싸는 것만으로 시험이 깨지면, 규칙이
+        살아 있는지가 아니라 어디서 줄이 바뀌었는지를 재게 된다.
+        """
+        return " ".join(llm.script_style_prompt("product").split())
 
-    def test_the_ending_is_asked_to_vary(self):
-        prompt = llm.script_style_prompt("product")
-        self.assertIn("say something different each time", prompt)
+    def test_the_stale_phrase_is_banned(self):
+        self.assertIn("never write 자리값", self._prompt())
+
+    def test_the_ending_varies_by_construction(self):
+        """
+        "매번 다르게 쓰라" 고 적어 두는 것만으로는 안 됐다. 여덟 편이 전부 같은
+        모양으로 끝났고, 한 방향을 지정했더니 이번엔 전부 같은 말로 시작했다.
+        그래서 끝내는 법을 여러 개 두고 매번 하나를 뽑는다.
+        """
+        self.assertGreaterEqual(len(llm.PRODUCT_ENDINGS), 3)
+        self.assertNotIn(
+            llm.PRODUCT_ENDINGS[llm.DEFAULT_PRODUCT_ENDING],
+            llm.script_style_prompt("product"),
+        )
 
     def test_the_ending_is_not_translated_from_another_language(self):
         """
         "earns its place" 를 옮기다 자리값이 나왔다. 옮기지 말라고 해야 한다.
         """
-        prompt = llm.script_style_prompt("product")
-        self.assertIn("Do not translate a\n   phrase from another language", prompt)
+        prompt = self._prompt()
+        self.assertIn("Do not translate a phrase from another language", prompt)
         self.assertNotIn("earns its place", prompt)
 
     def test_the_ending_rule_is_not_only_about_korean(self):
@@ -674,9 +689,9 @@ class TestClosingLine(unittest.TestCase):
         이 프롬프트는 어느 언어로든 쓴다. 한국어 사람처럼 쓰라고만 하면, 영어
         대본에 한국어 표현이 섞이거나 언어가 흔들린다.
         """
-        prompt = llm.script_style_prompt("product")
+        prompt = self._prompt()
 
-        self.assertIn("Whatever language you are writing in", prompt)
+        self.assertIn("whatever language you are writing in", prompt.lower())
         # 한국어 예시는 한국어일 때만 쓰라고 표시되어 있어야 한다.
         korean_note = prompt.split("Writing in Korean:", 1)
         self.assertEqual(len(korean_note), 2)
@@ -710,3 +725,163 @@ class TestOldVoiceNames(unittest.TestCase):
     def test_no_old_name_shadows_a_current_one(self):
         """겹치면 지금 이름이 옛 이름으로 덮인다."""
         self.assertFalse(set(llm.LEGACY_PRODUCT_VOICES) & set(llm.PRODUCT_VOICES))
+
+
+class TestHowItEnds(unittest.TestCase):
+    """
+    끝은 특히 빨리 낡는 자리다. 한 가지로 두면 두 편만 봐도 같은 문장이 들린다.
+    실제로 여덟 편이 전부 "~한 사람이면 편해요" 로 끝난 적이 있고, 장면으로
+    끝내라고 한 방향만 적었더니 이번엔 여덟 편이 전부 "오늘도" 로 시작했다.
+    """
+
+    def _prompt(self, ending):
+        return llm.build_script_prompt(
+            video_subject="외장하드", script_style="product", product_ending=ending
+        )
+
+    def test_there_are_at_least_as_many_endings_as_openings(self):
+        """
+        끝이 여는 쪽보다 빨리 낡는다. 여는 방식보다 적게 두면, 이어 보는 사람이
+        끝에서 먼저 같은 것을 듣는다.
+        """
+        self.assertGreaterEqual(len(llm.PRODUCT_ENDINGS), len(llm.PRODUCT_VOICES))
+
+    def test_each_ending_asks_for_something_different(self):
+        """이름만 다르고 시키는 것이 같으면, 뽑아 써도 결과가 그대로다."""
+        self.assertEqual(len(set(llm.PRODUCT_ENDINGS.values())), len(llm.PRODUCT_ENDINGS))
+
+    def test_the_chosen_ending_is_in_the_prompt(self):
+        for name, body in llm.PRODUCT_ENDINGS.items():
+            with self.subTest(ending=name):
+                self.assertIn(body, self._prompt(name))
+
+    def test_only_the_chosen_ending_is_in_the_prompt(self):
+        """둘이 함께 들어가면 서로 다른 것을 시켜 모델이 하나를 고른다."""
+        prompt = self._prompt("someone_else")
+        others = [b for n, b in llm.PRODUCT_ENDINGS.items() if n != "someone_else"]
+        for body in others:
+            self.assertNotIn(body, prompt)
+
+    def test_an_unknown_ending_falls_back_instead_of_failing(self):
+        self.assertEqual(
+            llm.resolve_product_ending("없는끝"), llm.DEFAULT_PRODUCT_ENDING
+        )
+        self.assertEqual(llm.resolve_product_ending(""), llm.DEFAULT_PRODUCT_ENDING)
+        self.assertIn(
+            llm.PRODUCT_ENDINGS[llm.DEFAULT_PRODUCT_ENDING], self._prompt("없는끝")
+        )
+
+    def test_an_unknown_ending_is_not_written_into_the_log(self):
+        """이 칸에 다른 것을 잘못 넣어 보낼 수 있다."""
+        secret = "sk-abcdef0123456789"
+        with patch.object(llm.logger, "warning") as warned:
+            llm.resolve_product_ending(secret)
+
+        said = " ".join(str(call.args[0]) for call in warned.call_args_list)
+        self.assertNotIn(secret, said)
+        self.assertIn(str(len(secret)), said)
+
+    def test_picking_spreads_across_the_endings(self):
+        """하나만 계속 뽑히면 여러 개를 둔 의미가 없다."""
+        picked = {llm.pick_product_ending() for _ in range(200)}
+        self.assertEqual(picked, set(llm.PRODUCT_ENDINGS))
+
+    def test_other_styles_do_not_get_an_ending(self):
+        for style in ("informative", "story"):
+            with self.subTest(style=style):
+                prompt = llm.build_script_prompt(
+                    video_subject="주제",
+                    script_style=style,
+                    product_ending="someone_else",
+                )
+                self.assertNotIn(llm.PRODUCT_ENDINGS["someone_else"], prompt)
+
+    def test_a_hand_written_prompt_is_not_overridden(self):
+        prompt = llm.build_script_prompt(
+            video_subject="주제",
+            script_style="product",
+            product_ending="someone_else",
+            custom_system_prompt="내가 쓴 프롬프트",
+        )
+        self.assertNotIn(llm.PRODUCT_ENDINGS["someone_else"], prompt)
+
+    def test_the_verdict_shape_is_ruled_out(self):
+        """
+        조건부 평가로 끝내면 두 편만 봐도 같은 문장이 들린다. 어느 장치를 뽑든
+        이것만은 막혀 있어야 한다.
+        """
+        common = llm.script_style_prompt("product")
+        self.assertIn("사람이면 편해요", common)
+        self.assertIn("conditional verdict", common)
+
+    def test_no_ending_says_to_mark_it_as_a_habit(self):
+        """
+        한 방향만 적었을 때 여덟 편이 전부 "오늘도" 로 시작했다. 그 표현을 다시
+        권하는 장치가 들어오면 같은 일이 난다.
+        """
+        for name, body in llm.PRODUCT_ENDINGS.items():
+            with self.subTest(ending=name):
+                self.assertNotIn("오늘도 ", body)
+
+
+class TestEveryEntryPointGetsVariety(unittest.TestCase):
+    """
+    봇과 화면의 대본 만들기, /scripts 는 작업 파이프라인을 거치지 않고 여기를 바로
+    부른다. 고르지 않았을 때 정해진 값으로 떨어지면, 그쪽으로 만든 대본은 전부
+    같은 여는 방식과 같은 끝내는 법이 된다.
+    """
+
+    def _devices(self, **kwargs):
+        seen = {"voices": set(), "endings": set()}
+
+        def remember(prompt, **_):
+            for name, body in llm.PRODUCT_VOICES.items():
+                if body in prompt:
+                    seen["voices"].add(name)
+            for name, body in llm.PRODUCT_ENDINGS.items():
+                if body in prompt:
+                    seen["endings"].add(name)
+            return "대본"
+
+        with patch.object(llm, "_generate_response", side_effect=remember):
+            for _ in range(120):
+                llm.generate_script(video_subject="주제", script_style="product", **kwargs)
+        return seen
+
+    def test_a_caller_that_picks_nothing_still_gets_variety(self):
+        seen = self._devices()
+
+        self.assertEqual(seen["voices"], set(llm.PRODUCT_VOICES))
+        self.assertEqual(seen["endings"], set(llm.PRODUCT_ENDINGS))
+
+    def test_what_the_caller_chose_is_not_overridden(self):
+        """기록으로 다시 만들면 같은 대본이 나와야 한다."""
+        seen = self._devices(product_voice="days", product_ending="unfinished")
+
+        self.assertEqual(seen["voices"], {"days"})
+        self.assertEqual(seen["endings"], {"unfinished"})
+
+    def test_a_hand_written_prompt_gets_no_devices(self):
+        seen = self._devices(custom_system_prompt="내가 쓴 프롬프트")
+
+        self.assertEqual(seen["voices"], set())
+        self.assertEqual(seen["endings"], set())
+
+    def test_other_styles_get_no_devices(self):
+        seen = {"voices": set(), "endings": set()}
+
+        def remember(prompt, **_):
+            for name, body in llm.PRODUCT_VOICES.items():
+                if body in prompt:
+                    seen["voices"].add(name)
+            for name, body in llm.PRODUCT_ENDINGS.items():
+                if body in prompt:
+                    seen["endings"].add(name)
+            return "대본"
+
+        with patch.object(llm, "_generate_response", side_effect=remember):
+            for _ in range(20):
+                llm.generate_script(video_subject="주제", script_style="informative")
+
+        self.assertEqual(seen["voices"], set())
+        self.assertEqual(seen["endings"], set())
