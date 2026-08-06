@@ -192,6 +192,14 @@ Four beats. The proportions matter more than the wording.
    actually became different. Show it working, not sitting there. Say what you
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
+
+   This is one stretch of time, told in the order it happened, and all of it has
+   already happened. The trouble and the fix belong to the same story: the same
+   trip, the same week, the same flat. Time may move forward inside it — the
+   next day, the next city — but it moves forward once and keeps going the same
+   way. Never jump to a separate occasion months later, and never turn the fix
+   into something you plan to do. "다음 여행엔 챙겨 갔음" reads as two different
+   trips at once, and the viewer stops working out when any of it happened.
 4. **Who it is for (inside beat 3, not at the end)** — name the person by what
    their week looks like, not by a category: "촬영 자주 나가서 원본이 계속 쌓이는
    사람" over "영상 편집자". Put it where it belongs in the story and keep going.
@@ -202,8 +210,12 @@ Four beats. The proportions matter more than the wording.
    plays again from the top. So it must not sound finished. A verdict closes the
    door and tells the viewer to leave.
 
-   How this one lands is set at the end of this prompt. Whatever it says, two
-   shapes are out, because they are where this goes stale fastest:
+   How this one lands is set at the end of this prompt. Wherever it lands, it
+   lands inside the same stretch of time as the rest — the story is over by the
+   time you speak, so the last line is not tomorrow and not a plan.
+
+   Whatever it says, two shapes are out, because they are where this goes stale
+   fastest:
 
    - a conditional verdict: "~한 사람이면 편해요", "~하는 집이면 쓸 만해요". Once
      you have written one of these you have written all of them, and a viewer
@@ -354,9 +366,11 @@ and stop there. Do not explain why it is better; the absence says it.
     "unfinished": """
 ## How this one lands: still going
 
-End mid-situation, on something you have not settled yet — the second one you
-are thinking about, the place you have not tried it, the thing you still do the
-old way. No conclusion. Leave it open.
+End on something that stayed unsettled — the thing you still did the old way,
+the spot you never got around to, the one you kept meaning to buy. It belongs to
+the same stretch of time as the rest and is spoken of the same way, in the past.
+Not tomorrow, not tonight, not a plan. No conclusion; just leave the loose end
+where it lay.
 """.strip(),
 }
 DEFAULT_PRODUCT_ENDING = "next_time"
