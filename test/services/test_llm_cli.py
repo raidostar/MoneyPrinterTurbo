@@ -195,21 +195,16 @@ class TestWhichModelAnswers(unittest.TestCase):
 
         return get_llm_provider("claude_cli")
 
-    def test_a_model_is_always_chosen(self):
-        """비워 두면 도구의 기본값이 쓰인다 — 그 값은 우리가 고른 것이 아니다."""
-        self.assertTrue(self._spec().resolve_model_name(""))
-
-    def test_the_biggest_model_is_not_the_default(self):
-        self.assertNotIn("opus", self._spec().resolve_model_name(""))
-
-    def test_the_smallest_model_is_not_the_default(self):
+    def test_the_model_we_measured_is_the_one_that_runs(self):
         """
-        더 작은 모델은 이 프롬프트를 다 지키지 못했다. 한 대본 안에서 여행을 두 번
-        가고, 쓰지 말라고 적어 둔 말이 그대로 나왔다.
+        비워 두면 도구가 제일 큰 모델로 답한다. 더 작은 모델은 이 프롬프트를 다
+        지키지 못했다 — 한 대본 안에서 여행을 두 번 가고, 쓰지 말라고 적어 둔 말이
+        그대로 나왔다. 재 보고 고른 값이라, 바뀌면 여기서 걸려야 한다.
         """
-        self.assertNotIn("haiku", self._spec().resolve_model_name(""))
+        self.assertEqual(self._spec().resolve_model_name(""), "sonnet")
 
     def test_what_is_configured_wins(self):
+        """재 본 값이 기본일 뿐이고, 바꿔 쓸 수 있어야 한다."""
         self.assertEqual(self._spec().resolve_model_name("opus"), "opus")
 
     def test_the_chosen_model_reaches_the_tool(self):
