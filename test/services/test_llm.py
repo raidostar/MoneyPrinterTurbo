@@ -273,6 +273,8 @@ class TestLiteLLMProvider(unittest.TestCase):
             [provider.provider_id for provider in LLM_PROVIDER_REGISTRY],
             [
                 "moonshot",
+                # 이미 구독해서 쓰는 도구. 키가 없어 바로 켤 수 있으므로 앞에 둔다.
+                "claude_cli",
                 "openai",
                 "gemini",
                 "deepseek",
@@ -385,9 +387,15 @@ class TestLiteLLMProvider(unittest.TestCase):
             for provider in LLM_PROVIDER_REGISTRY:
                 tips = translations[provider.tips_key]
                 self.assertTrue(tips.startswith("##### "), provider.provider_id)
-                self.assertIn("**API Key**", tips, provider.provider_id)
-                self.assertIn("**Base Url**", tips, provider.provider_id)
-                self.assertIn("**Model Name**", tips, provider.provider_id)
+                # 채울 칸이 있는 Provider 만 그 칸을 설명한다. 키도 주소도 모델도
+                # 받지 않는 Provider 에 그 항목을 적어 두면, 화면이 채울 수 없는
+                # 칸을 채우라고 말하게 된다.
+                if provider.show_api_key:
+                    self.assertIn("**API Key**", tips, provider.provider_id)
+                if provider.show_base_url:
+                    self.assertIn("**Base Url**", tips, provider.provider_id)
+                if provider.requires_model_name:
+                    self.assertIn("**Model Name**", tips, provider.provider_id)
 
         zh_kimi_tips = json.loads((i18n_dir / "zh.json").read_text(encoding="utf-8"))[
             "Translation"
