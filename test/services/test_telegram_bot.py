@@ -3,10 +3,15 @@
 import time
 import unittest
 import unittest.mock
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import telegram_bot as bot
+
+# 텔레그램이 callback_data 로 받아 주는 최대 크기. 넘기면 메시지 자체가 거부되어
+# 버튼이 아예 안 나온다.
+MAX_CALLBACK_DATA_BYTES = 64
 
 
 def _message(chat_id, text):
@@ -1079,6 +1084,70 @@ class TestPersonaPicker(unittest.TestCase):
         said = str(send.call_args.kwargs["buttons"])
         self.assertIn("해린맘", said)
         self.assertIn("김부장", said)
+
+    def test_many_people_still_fit_on_the_screen(self):
+        """
+        한 줄에 그대로 밀어 넣으면 텔레그램이 폭을 나눠 써서, 넷만 되어도 이름이
+        잘려 무엇을 고르는지 안 보인다.
+        """
+        crowd = {
+            f"person{index}": replace(
+                bot.persona.PERSONAS["haerinmom"],
+                key=f"person{index}",
+                name=f"사람{index}",
+            )
+            for index in range(7)
+        }
+        shorts = self._bot()
+        with (
+            patch.dict(bot.persona.PERSONAS, crowd, clear=True),
+            patch.object(shorts, "_draft_script") as draft,
+            patch.object(bot, "_send") as send,
+        ):
+            shorts.handle_update(_message(111, "/새영상 실리콘 주방집게"))
+
+        draft.assert_not_called()
+        rows = send.call_args.kwargs["buttons"]
+        # 몇 개까지 한 줄에 넣을지는 정해 둔 값을 따르되, 그 값 자체가 커지면
+        # 같은 문제가 다시 생기므로 여기서 함께 묶어 둔다.
+        self.assertLessEqual(bot.PERSONA_BUTTONS_PER_ROW, 3)
+        for row in rows:
+            self.assertLessEqual(len(row), bot.PERSONA_BUTTONS_PER_ROW)
+
+        # 줄로 나누다 한 사람이 빠지면 그 채널로는 영상을 못 만든다.
+        offered = [button["text"] for row in rows for button in row]
+        self.assertEqual(
+            sorted(offered), sorted(speaker.name for speaker in crowd.values())
+        )
+
+    def test_every_button_fits_what_telegram_accepts(self):
+        """
+        callback_data 가 64바이트를 넘으면 메시지 자체가 거부된다 — 버튼이 아예
+        안 나오고 주제만 남아, 눌러 볼 것이 없다.
+
+        지금 등록된 이름만 재면 짧아서 늘 통과한다. 이름에 허용된 최대 길이로
+        재야 나중에 긴 이름을 넣었을 때 여기서 걸린다.
+        """
+        longest = "a" * bot.persona.MAX_KEY_LENGTH
+        crowd = {
+            longest: replace(bot.persona.PERSONAS["haerinmom"], key=longest),
+            "kimbujang": bot.persona.PERSONAS["kimbujang"],
+        }
+        shorts = self._bot()
+        with (
+            patch.dict(bot.persona.PERSONAS, crowd, clear=True),
+            patch.object(shorts, "_draft_script"),
+            patch.object(bot, "_send") as send,
+        ):
+            shorts.handle_update(_message(111, "/새영상 실리콘 주방집게"))
+
+        for row in send.call_args.kwargs["buttons"]:
+            for button in row:
+                with self.subTest(button=button["text"]):
+                    self.assertLessEqual(
+                        len(button["callback_data"].encode("utf-8")),
+                        MAX_CALLBACK_DATA_BYTES,
+                    )
 
     def test_one_person_is_not_worth_asking_about(self):
         """고를 것이 하나뿐인데 물어보면 누르는 일만 는다."""

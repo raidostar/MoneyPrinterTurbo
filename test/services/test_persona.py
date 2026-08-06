@@ -28,6 +28,22 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(speaker.key, "haerinmom")
         self.assertEqual(speaker.name, "해린맘")
 
+    def test_every_name_fits_where_it_has_to_go(self):
+        """
+        이름은 요청과 기록을 오가고 텔레그램 버튼에도 실린다. 어느 한 곳이라도
+        넘치면 그 사람만 조용히 못 쓰게 된다 — 버튼이 안 나오거나 요청이 거부된다.
+        """
+        from app.models.schema import VideoParams
+
+        limit = VideoParams.model_fields["product_persona"].metadata[0].max_length
+        self.assertEqual(persona.MAX_KEY_LENGTH, limit)
+        for key in persona.PERSONAS:
+            with self.subTest(persona=key):
+                self.assertLessEqual(len(key), persona.MAX_KEY_LENGTH)
+                # 사람이 읽고 옮겨 적는 값이다. 한글이나 공백이 섞이면 설정과
+                # 기록에서 같은 이름이 다르게 적힌다.
+                self.assertRegex(key, r"^[a-z0-9-]+$")
+
     def test_every_person_has_a_voice_that_exists(self):
         """
         여기 적은 이름이 실제 목록에 없으면 그 사람의 영상만 소리 없이 실패한다.
