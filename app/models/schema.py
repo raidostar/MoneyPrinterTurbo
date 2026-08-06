@@ -153,6 +153,9 @@ class VideoParams(BaseModel):
     # 제품 대본을 여는 방식. 비워 두면 만들 때 하나를 뽑아 여기에 기록한다. 매번
     # 같게 열면 몇 편만 이어 봐도 기계가 썼다는 것이 보인다.
     product_voice: str = Field(default="", max_length=32)
+    # 제품 대본을 끝내는 법. 같은 이유로 매번 하나를 뽑아 여기에 기록한다. 끝은
+    # 특히 빨리 낡는 자리라, 한 가지로 두면 두 편만 봐도 같은 문장이 들린다.
+    product_ending: str = Field(default="", max_length=32)
     # 대본을 쓰는 사람. 채널 하나는 한 사람이 말하는 곳이므로 설정에서 정하고,
     # 실제로 쓰인 값을 여기에 남긴다.
     product_persona: str = Field(default="", max_length=32)

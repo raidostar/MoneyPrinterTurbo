@@ -192,23 +192,29 @@ Four beats. The proportions matter more than the wording.
    actually became different. Show it working, not sitting there. Say what you
    do with it, in what order, at what moment of the day. One concrete before and
    after beats any adjective.
-4. **Who it is for (last one or two sentences)** — name the person by what their
-   week looks like, not by a category: "촬영 자주 나가서 원본이 계속 쌓이는 사람"
-   over "영상 편집자". End there. Do not list who should skip it, do not hedge,
-   do not add a drawback at the end. Never "링크 확인", never "구매하세요".
+4. **Who it is for (inside beat 3, not at the end)** — name the person by what
+   their week looks like, not by a category: "촬영 자주 나가서 원본이 계속 쌓이는
+   사람" over "영상 편집자". Put it where it belongs in the story and keep going.
+   Do not list who should skip it, do not hedge, do not add a drawback. Never
+   "링크 확인", never "구매하세요".
+5. **The last line — back where it started** — this is a vertical short. Nobody
+   clicked it; it was already playing when they arrived, and when it ends it
+   plays again from the top. So it must not sound finished. A verdict closes the
+   door and tells the viewer to leave.
 
-   The closing words are where this goes stale fastest. Write the last line the
-   way that voice would actually say it, and say something different each time.
-   Sometimes that means saying what it was worth; sometimes it is enough to name
-   the person and stop, and letting that be the whole recommendation is often
-   the strongest ending of all.
+   How this one lands is set at the end of this prompt. Whatever it says, two
+   shapes are out, because they are where this goes stale fastest:
 
-   Whatever language you are writing in, the last line has to be something a
-   native speaker of that language would say unprompted. Do not translate a
-   phrase from another language for the ending — a literal rendering reads as
-   translated even when every word is correct. Writing in Korean: never write
-   자리값, which nobody says; 돈값 한다 or 여름엔 이게 있어야 한다 are the kind
-   of thing people actually say.
+   - a conditional verdict: "~한 사람이면 편해요", "~하는 집이면 쓸 만해요". Once
+     you have written one of these you have written all of them, and a viewer
+     who watches two of your videos hears the same sentence twice.
+   - a summary of what you just said. They just heard it.
+
+   Write it the way that voice would actually say it — whatever language you are
+   writing in, the last line has to be something a native speaker would say
+   unprompted. Do not translate a phrase from another language; a literal
+   rendering reads as translated even when every word is correct. Writing in
+   Korean: never write 자리값, which nobody says.
 
 ## The hard line on invention
 
@@ -311,6 +317,50 @@ say the new way is better.
 }
 DEFAULT_PRODUCT_VOICE = "scene"
 
+# 어떻게 끝낼지. 여는 방식과 같은 이유로 매번 하나를 뽑는다 — 끝내는 법을 한 가지만
+# 적어 두면 모델이 그 한 가지의 같은 표현으로 고정된다. 조건부 평가로 끝내라고 한
+# 적이 없는데도 여덟 편이 전부 "~한 사람이면 편해요" 로 끝났고, 장면으로 끝내라고
+# 고쳤더니 이번엔 여덟 편이 전부 "오늘도" 로 시작했다.
+#
+# 어느 것을 뽑든 닫히지 않아야 한다. 세로 쇼츠는 아무도 누르지 않았고, 끝나면 위에서
+# 다시 돈다. 평결로 닫으면 나가라는 신호가 된다.
+PRODUCT_ENDINGS = {
+    "next_time": """
+## How this one lands: the next time it comes around
+
+End on the same moment from the opening, happening again — but this time it goes
+past without incident. One line, inside the scene. Do not mark it as a habit and
+do not start with 오늘도, 이제는, 요즘은; just say what happens.
+""".strip(),
+    "small_detail": """
+## How this one lands: on one small thing
+
+End on a detail too small to be the point — where it sits, what it sounds like,
+what your hands do without looking. Nothing about worth, nothing about who
+should buy it. The smallness is what makes it sound true.
+""".strip(),
+    "someone_else": """
+## How this one lands: someone else noticed
+
+End on another person in your life reacting to it — asking where you got it,
+using it without permission, taking it home. Their words, not your verdict.
+""".strip(),
+    "what_you_stopped": """
+## How this one lands: what you no longer do
+
+End on the thing that dropped out of your day. Name the old action, in the past,
+and stop there. Do not explain why it is better; the absence says it.
+""".strip(),
+    "unfinished": """
+## How this one lands: still going
+
+End mid-situation, on something you have not settled yet — the second one you
+are thinking about, the place you have not tried it, the thing you still do the
+old way. No conclusion. Leave it open.
+""".strip(),
+}
+DEFAULT_PRODUCT_ENDING = "next_time"
+
 # 사람을 정하지 않았을 때 쓰는 말투. 여는 방식은 어미를 정하지 않으므로, 이것이
 # 없으면 어느 쪽으로 쓸지 정한 곳이 아무 데도 없어져 영상마다 존댓말과 반말이
 # 섞인다. 채널을 운영할 것이라면 사람을 정하는 편이 낫고, 이것은 일회성 영상을
@@ -352,6 +402,25 @@ def resolve_product_voice(name: str) -> str:
 def pick_product_voice() -> str:
     """이번 대본에 쓸 말투를 하나 뽑는다."""
     return random.choice(sorted(PRODUCT_VOICES))
+
+
+def resolve_product_ending(name: str) -> str:
+    """쓸 수 있는 끝내는 법 이름으로 맞춘다. 모르는 이름이면 기본값."""
+    key = str(name or "").strip().lower()
+    if key in PRODUCT_ENDINGS:
+        return key
+    if key:
+        # 여는 방식과 같은 이유로 값 자체는 남기지 않는다.
+        logger.warning(
+            f"unknown product ending ({len(key)} characters), "
+            f"using {DEFAULT_PRODUCT_ENDING}"
+        )
+    return DEFAULT_PRODUCT_ENDING
+
+
+def pick_product_ending() -> str:
+    """이번 대본을 어떻게 끝낼지 하나 뽑는다."""
+    return random.choice(sorted(PRODUCT_ENDINGS))
 
 
 # 스타일 이름 → 기본 system prompt. 스키마와 WebUI 목록이 이 딕셔너리를 그대로 쓴다.
@@ -870,6 +939,7 @@ def build_script_prompt(
     custom_system_prompt: str = "",
     script_style: str = "",
     product_voice: str = "",
+    product_ending: str = "",
     product_persona: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
@@ -902,6 +972,7 @@ def build_script_prompt(
             speaker.as_prompt() if speaker is not None else NO_PERSONA_REGISTER
         )
         prompt += "\n\n" + PRODUCT_VOICES[resolve_product_voice(product_voice)]
+        prompt += "\n\n" + PRODUCT_ENDINGS[resolve_product_ending(product_ending)]
     # 주제, 언어, 추가 요구사항은 사용자가 쓴 글이라 규칙처럼 읽힐 수 있다. 헤드라인
     # 쪽과 같은 방식으로 경계를 표시하고 꺾쇠를 이스케이프해, 재료 쪽에서 구분자를
     # 만들 수 없게 한다.
@@ -952,6 +1023,7 @@ def generate_script(
     custom_system_prompt: str = "",
     script_style: str = "",
     product_voice: str = "",
+    product_ending: str = "",
     product_persona: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
@@ -969,6 +1041,7 @@ def generate_script(
         custom_system_prompt=custom_system_prompt,
         script_style=script_style,
         product_voice=product_voice,
+        product_ending=product_ending,
         product_persona=product_persona,
     )
     final_script = ""

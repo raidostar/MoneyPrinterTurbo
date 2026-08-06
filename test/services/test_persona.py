@@ -262,6 +262,47 @@ class TestRecordedOnTheTask(unittest.TestCase):
             tm.generate_script("task-id", params)
         return generate
 
+    def test_the_ending_is_picked_and_recorded(self):
+        """
+        여는 방식과 같다. 뽑기만 하고 안 남기면, 마음에 든 대본이 어떻게 끝났는지
+        되짚을 수 없고 같은 기록으로 다시 만들면 다른 대본이 나온다.
+        """
+        from app.services import task as tm
+
+        params = self._params()
+        with (
+            patch.object(tm.llm, "pick_product_ending", return_value="someone_else"),
+            patch.object(tm.llm, "pick_product_voice", return_value="days"),
+            patch.object(tm.llm, "generate_script", return_value="대본") as generate,
+        ):
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(params.product_ending, "someone_else")
+        self.assertEqual(generate.call_args.kwargs["product_ending"], "someone_else")
+
+    def test_a_recorded_ending_is_used_again(self):
+        """기록으로 다시 만들면 같은 대본이 나와야 한다."""
+        from app.services import task as tm
+
+        params = self._params(product_ending="unfinished")
+        with (
+            patch.object(tm.llm, "pick_product_ending", return_value="someone_else"),
+            patch.object(tm.llm, "generate_script", return_value="대본") as generate,
+        ):
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(generate.call_args.kwargs["product_ending"], "unfinished")
+
+    def test_a_script_that_is_already_written_records_no_ending(self):
+        """여기서 만들지 않았으면 끝내는 법도 쓰이지 않았다."""
+        from app.services import task as tm
+
+        params = self._params(video_script="넘겨받은 대본", product_ending="unfinished")
+        with patch.object(tm.llm, "generate_script"):
+            tm.generate_script("task-id", params)
+
+        self.assertEqual(params.product_ending, "")
+
     def test_the_configured_speaker_is_used_and_recorded(self):
         params = self._params()
         with patch.object(persona.config, "app", {"product_persona": "haerinmom"}):
